@@ -1,0 +1,88 @@
+nextflow_process {
+    name "Test Process SKA2_DELETE"
+    script "../main.nf"
+    process "SKA2_DELETE"
+
+    tag "modules"
+    tag "ska2"
+    tag "ska2/delete"
+    tag "ska2/build"
+    tag "ska2/merge"
+
+    test("remove one sample from merged SKF of two Bacteroides uniformis genomes") {
+        setup {
+            run("SKA2_BUILD", alias: "BUILD_1") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_2") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_909' ],
+                        file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_MERGE") {
+                script "../../merge/main.nf"
+                process {
+                    """
+                    input[0] = BUILD_1.out.skf.mix(BUILD_2.out.skf)
+                        .map { meta, skf -> skf }
+                        .collect()
+                    """
+                }
+            }
+        }
+        when {
+            process {
+                """
+                // Sample names in the SKF match the FASTA basename (not meta.id)
+                input[0] = SKA2_MERGE.out.skf
+                input[1] = file("${projectDir}/tests/data/delete_samples.txt", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.skf.size() == 1 },
+                { assert path(process.out.skf.get(0)).exists() },
+                { assert path(process.out.skf.get(0)).size() > 0 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("remove one sample from merged SKF - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = file('stub.skf')
+                input[1] = file('stub_samples.txt')
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

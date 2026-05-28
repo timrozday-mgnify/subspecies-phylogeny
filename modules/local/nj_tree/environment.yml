@@ -1,0 +1,4 @@
+channels:
+  - conda-forge
+dependencies:
+  - r-ape=5.8

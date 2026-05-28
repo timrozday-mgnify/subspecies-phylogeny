@@ -1,0 +1,30 @@
+{
+    "merged SKF from two B. uniformis genomes - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,8a6c3077bb20c120f822fa4893543094"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T08:50:24.706844",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "merged SKF from two Bacteroides uniformis genomes": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,8a6c3077bb20c120f822fa4893543094"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T08:50:21.997676",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

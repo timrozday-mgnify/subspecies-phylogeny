@@ -1,0 +1,76 @@
+nextflow_process {
+    name "Test Process SKA2_MERGE"
+    script "../main.nf"
+    process "SKA2_MERGE"
+
+    tag "modules"
+    tag "ska2"
+    tag "ska2/merge"
+    tag "ska2/build"
+
+    test("two Bacteroides uniformis genomes") {
+        setup {
+            run("SKA2_BUILD", alias: "BUILD_1") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_2") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_909' ],
+                        file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+        }
+        when {
+            process {
+                """
+                input[0] = BUILD_1.out.skf.mix(BUILD_2.out.skf)
+                    .map { meta, skf -> skf }
+                    .collect()
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.skf.size() == 1 },
+                { assert path(process.out.skf.get(0)).exists() },
+                { assert path(process.out.skf.get(0)).size() > 0 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("two Bacteroides uniformis genomes - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ file('stub1.skf'), file('stub2.skf') ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

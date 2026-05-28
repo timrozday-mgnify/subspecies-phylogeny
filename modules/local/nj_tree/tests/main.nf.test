@@ -1,0 +1,86 @@
+nextflow_process {
+    name "Test Process NJ_TREE"
+    script "../main.nf"
+    process "NJ_TREE"
+
+    tag "modules"
+    tag "nj_tree"
+    tag "r"
+
+    test("NJ tree from FastANI distances (three B. uniformis genomes)") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id:'fastani', format:'fastani' ],
+                    file("${projectDir}/tests/data/fastani_three_samples.txt", checkIfExists: true)
+                ]
+                """
+            }
+            config "./nextflow.config"
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.tree.size() == 1 },
+                { assert path(process.out.tree.get(0)[1]).exists() },
+                { assert path(process.out.tree.get(0)[1]).size() > 0 },
+                // Newick should contain all three sample names
+                { assert path(process.out.tree.get(0)[1]).text.contains("BU_61_NT5381.1") },
+                { assert path(process.out.tree.get(0)[1]).text.contains("BU_909_NT5401.1") },
+                { assert path(process.out.tree.get(0)[1]).text.contains("BU_AN67_NT5182.1") },
+                { assert process.out.plot.size() == 1 },
+                { assert path(process.out.plot.get(0)[1]).exists() },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("NJ tree from SKA2 distances (three B. uniformis genomes)") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id:'ska2_distance', format:'ska2' ],
+                    file("${projectDir}/tests/data/ska2_distances_three_samples.tsv", checkIfExists: true)
+                ]
+                """
+            }
+            config "./nextflow.config"
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.tree.size() == 1 },
+                { assert path(process.out.tree.get(0)[1]).exists() },
+                { assert path(process.out.tree.get(0)[1]).size() > 0 },
+                { assert process.out.plot.size() == 1 },
+                { assert path(process.out.plot.get(0)[1]).exists() },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("NJ tree from FastANI distances - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ [ id:'fastani', format:'fastani' ], file('stub.txt') ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

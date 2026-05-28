@@ -1,0 +1,21 @@
+# Stage 4 — Final phylogeny
+#
+# Purpose: run the full pipeline through IQ-TREE. All four analysis branches
+# (weed × gubbins) are inferred in parallel. Use the Gubbins and weed
+# parameters finalised in stage 3.
+#
+# Final outputs:
+#   results/iqtree/no_weed/no_gubbins/min_freq_0.9/tree.treefile
+#   results/iqtree/no_weed/gubbins/min_freq_0.9/tree.treefile
+#   results/iqtree/weed/no_gubbins/min_freq_0.9/tree.treefile
+#   results/iqtree/weed/gubbins/min_freq_0.9/tree.treefile
+#   results/multiqc/multiqc_report.html
+
+ska_merged_skf: "results/01_build/ska2/merged.skf"
+outdir: "results/04_final"
+
+# Single min-freq value chosen from stage 2.
+ska_align_min_freq: "0.9"
+
+# Uncomment to remove outliers.
+# ska_delete_samples: "outliers.txt"

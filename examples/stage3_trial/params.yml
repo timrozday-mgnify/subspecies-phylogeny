@@ -1,0 +1,38 @@
+# Stage 3 — Trial Gubbins and ska weed parameters
+#
+# Purpose: with a chosen min-freq value, run the full alignment block on both
+# the raw and weeded SKF, and run Gubbins on both, producing four parallel
+# analysis branches (weed × gubbins). IQ-TREE is skipped so that Gubbins and
+# alignment outputs can be assessed before committing to tree inference.
+#
+# Outputs to check before proceeding:
+#   results/ska2/no_weed/min_freq_0.9/alignment.fasta
+#   results/ska2/weed/min_freq_0.9/alignment.fasta
+#     Compare lengths: weed removes rare/noisy k-mer positions, so the weeded
+#     alignment will be shorter. A large reduction suggests many low-quality
+#     positions; a small reduction suggests weed has little effect at these
+#     settings.
+#
+#   results/gubbins/{no_weed,weed}/min_freq_0.9/*.recombination_predictions.gff
+#     Check predicted recombinant regions. If recombination blocks cover a
+#     large fraction of the alignment, consider whether the genomes are truly
+#     closely related or whether the signal is artefactual (check FastANI ANI).
+#
+#   results/gubbins/{no_weed,weed}/min_freq_0.9/*.filtered_polymorphic_sites.fasta
+#     This is what feeds IQ-TREE on the gubbins track. Check it is non-empty
+#     and has a reasonable number of variable sites.
+#
+# Iterate on modules.config (Gubbins --min-snps, --iterations, --tree-builder;
+# ska weed --min-freq, --filter) until satisfied, then move to stage 4.
+
+ska_merged_skf: "results/01_build/ska2/merged.skf"
+outdir: "results/03_trial"
+
+# Use the single min-freq value chosen from stage 2.
+ska_align_min_freq: "0.9"
+
+# Uncomment to remove outliers (same file as stage 2 if used there).
+# ska_delete_samples: "outliers.txt"
+
+# Skip IQ-TREE for this stage.
+skip_iqtree: true

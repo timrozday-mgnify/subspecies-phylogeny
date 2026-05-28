@@ -1,0 +1,30 @@
+{
+    "remove one sample from merged SKF of two Bacteroides uniformis genomes": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,a160a76aae31003418649e3f50be9146"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T09:17:58.251352",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "remove one sample from merged SKF - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,a160a76aae31003418649e3f50be9146"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T09:18:01.205963",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

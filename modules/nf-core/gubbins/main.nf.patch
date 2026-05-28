@@ -1,0 +1,130 @@
+# Local modifications to the nf-core/gubbins module
+#
+# Upstream source: https://github.com/nf-core/modules/blob/master/modules/nf-core/gubbins/main.nf
+#
+# Changes vs upstream:
+#   1. Added val(meta) to input and all output tuples. Same motivation as for
+#      snpsites: the pipeline runs Gubbins in parallel across weed × min_freq
+#      combinations and requires meta to keep branches distinct.
+#   2. Bumped container to gubbins 3.4.3 (upstream pins 3.3.5). The 3.3.5
+#      tag is not present in quay.io/biocontainers for the required platform.
+#   3. Added --prefix ${prefix} so output files are named after meta.id
+#      instead of the input filename. Without this, all branches produce
+#      files with the same basename and cannot be distinguished in the work
+#      directory.
+#   4. Replaced generic output globs (*.fasta, *.gff, *.vcf, *.csv, *.phylip)
+#      with specific Gubbins output file patterns (*.filtered_polymorphic_sites.fasta,
+#      *.recombination_predictions.gff, etc.). This prevents the module from
+#      inadvertently capturing the intermediate gubbins_input.fasta or other
+#      temporary files as outputs.
+#   5. Removed outputs that are not used downstream (embl_predicted,
+#      embl_branch, tree_labelled) and made tree and stats optional: true
+#      because Gubbins omits them when it detects no recombination.
+#   6. Replaced the topic-channel version emit with a standard versions.yml
+#      file, consistent with all other local and nf-core modules in this
+#      pipeline.
+#   7. Added an awk pre-processing step to replace IUPAC ambiguity codes
+#      (produced by ska align) with N before passing the alignment to Gubbins.
+#      Gubbins 3.4.3 rejects any character outside ACGTNacgtn-.
+#   8. Replaced 'mkdir numba_cache_dir' with NUMBA_CACHE_DIR="$PWD/.numba_cache"
+#      (no mkdir needed; numba creates the directory itself). The upstream
+#      approach uses a relative path string which resolves differently when
+#      Nextflow changes into the work directory.
+#   9. stub block rewritten to use --prefix-derived filenames and to emit
+#      versions.yml, matching the updated script block.
+
+--- a/modules/nf-core/gubbins/main.nf
++++ b/modules/nf-core/gubbins/main.nf
+@@ -1,55 +1,61 @@
+ process GUBBINS {
++    tag "$meta.id"
+     label 'process_medium'
+ 
+     conda "${moduleDir}/environment.yml"
+-    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
+-        'https://depot.galaxyproject.org/singularity/gubbins:3.3.5--py39pl5321he4a0461_0' :
+-        'quay.io/biocontainers/gubbins:3.3.5--py39pl5321he4a0461_0' }"
++    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
++        'https://depot.galaxyproject.org/singularity/gubbins:3.4.3--py310h5140242_0' :
++        'quay.io/biocontainers/gubbins:3.4.3--py310h5140242_0' }"
+ 
+     input:
+-    path alignment
++    tuple val(meta), path(alignment)
+ 
+     output:
+-    path "*.fasta"                          , emit: fasta
+-    path "*.gff"                            , emit: gff
+-    path "*.vcf"                            , emit: vcf
+-    path "*.csv"                            , emit: stats
+-    path "*.phylip"                         , emit: phylip
+-    path "*.recombination_predictions.embl" , emit: embl_predicted
+-    path "*.branch_base_reconstruction.embl", emit: embl_branch
+-    path "*.final_tree.tre"                 , emit: tree
+-    path "*.node_labelled.final_tree.tre"   , emit: tree_labelled
+-    tuple val("${task.process}"), val('gubbins'), eval("run_gubbins.py --version 2>&1"), topic: versions, emit: versions_gubbins
++    tuple val(meta), path("*.filtered_polymorphic_sites.fasta"), emit: fasta
++    tuple val(meta), path("*.recombination_predictions.gff"),    emit: gff
++    tuple val(meta), path("*.summary_of_snp_distribution.vcf"),  emit: vcf
++    tuple val(meta), path("*.filtered_polymorphic_sites.phylip"), emit: phylip
++    tuple val(meta), path("*.final_tree.tre"),                   emit: tree, optional: true
++    tuple val(meta), path("*.per_branch_statistics.csv"),        emit: stats, optional: true
++    path "versions.yml",                                         emit: versions
+ 
+     when:
+     task.ext.when == null || task.ext.when
+ 
+     script:
+-    def args = task.ext.args ?: ''
++    def args   = task.ext.args   ?: ''
++    def prefix = task.ext.prefix ?: "${meta.id}"
+     """
+-    mkdir numba_cache_dir
+-    export NUMBA_CACHE_DIR='./numba_cache_dir'
++    export NUMBA_CACHE_DIR="\$PWD/.numba_cache"
+ 
++    # Gubbins only accepts ACGTNacgtn-; SKA2 may emit IUPAC ambiguity codes.
++    awk '/^>/{print; next} {gsub(/[^ACGTNacgtn-]/, "N"); print}' ${alignment} > gubbins_input.fasta
++
+     run_gubbins.py \\
+-        --threads $task.cpus \\
++        --threads ${task.cpus} \\
++        --prefix ${prefix} \\
+         $args \\
+-        $alignment
++        gubbins_input.fasta
++
++    cat <<-END_VERSIONS > versions.yml
++    "${task.process}":
++        gubbins: \$(run_gubbins.py --version 2>&1 | sed 's/^run_gubbins.py //')
++    END_VERSIONS
+     """
+ 
+     stub:
+-
++    def prefix = task.ext.prefix ?: "${meta.id}"
+     """
+-    mkdir numba_cache_dir
+-    export NUMBA_CACHE_DIR='./numba_cache_dir'
++    touch ${prefix}.filtered_polymorphic_sites.fasta
++    touch ${prefix}.recombination_predictions.gff
++    touch ${prefix}.summary_of_snp_distribution.vcf
++    touch ${prefix}.filtered_polymorphic_sites.phylip
++    touch ${prefix}.final_tree.tre
++    touch ${prefix}.per_branch_statistics.csv
+ 
+-    touch ${alignment.baseName}.fasta
+-    touch ${alignment.baseName}.gff
+-    touch ${alignment.baseName}.vcf
+-    touch ${alignment.baseName}.csv
+-    touch ${alignment.baseName}.phylip
+-    touch ${alignment.baseName}.recombination_predictions.embl
+-    touch ${alignment.baseName}.branch_base_reconstruction.embl
+-    touch ${alignment.baseName}.final_tree.tre
+-    touch ${alignment.baseName}.node_labelled.final_tree.tre
++    cat <<-END_VERSIONS > versions.yml
++    "${task.process}":
++        gubbins: \$(run_gubbins.py --version 2>&1 | sed 's/^run_gubbins.py //')
++    END_VERSIONS
+     """
+ }

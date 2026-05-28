@@ -1,0 +1,44 @@
+{
+    "NJ tree from SKA2 distances (three B. uniformis genomes)": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,e416b185afa825767a79be8e8915549c"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T09:44:09.558557",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "NJ tree from FastANI distances (three B. uniformis genomes)": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,e416b185afa825767a79be8e8915549c"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T09:44:04.8618",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "NJ tree from FastANI distances - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,e416b185afa825767a79be8e8915549c"
+                ]
+            }
+        ],
+        "timestamp": "2026-05-28T09:44:13.990761",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

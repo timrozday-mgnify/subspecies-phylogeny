@@ -1,0 +1,56 @@
+nextflow_process {
+    name "Test Process SKA2_BUILD"
+    script "../main.nf"
+    process "SKA2_BUILD"
+
+    tag "modules"
+    tag "ska2"
+    tag "ska2/build"
+
+    test("Bacteroides uniformis genome [fasta]") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id:'BU_61' ],
+                    file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.skf.size() == 1 },
+                { assert process.out.skf.get(0).get(0).id == 'BU_61' },
+                { assert path(process.out.skf.get(0).get(1)).exists() },
+                { assert path(process.out.skf.get(0).get(1)).size() > 0 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id:'BU_61' ],
+                    file('stub.fa')
+                ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

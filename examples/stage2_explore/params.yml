@@ -1,0 +1,32 @@
+# Stage 2 — Explore min-freq values and optionally remove outliers
+#
+# Purpose: trial a range of --min-freq values for ska align to understand how
+# alignment length and missing-data fraction trade off. Optionally remove
+# outlier samples identified from the FastANI tree in stage 1. IQ-TREE is
+# skipped so this stage is fast.
+#
+# Outputs to check before proceeding:
+#   results/ska2/no_weed/min_freq_*/alignment.fasta  — compare lengths across thresholds
+#   results/snpsites/no_weed/min_freq_*/             — variable-site counts per threshold
+#
+# Choosing --ska_align_min_freq:
+#   Lower values (e.g. 0.5) keep positions present in only half the samples,
+#   giving longer alignments with more missing data. Higher values (e.g. 1.0)
+#   require every sample to have a base called, giving shorter but cleaner
+#   alignments. 0.9 is a reasonable starting point for most datasets.
+
+ska_merged_skf: "results/01_build/ska2/merged.skf"
+outdir: "results/02_explore"
+
+# Trial several thresholds; all branches run in parallel.
+ska_align_min_freq: "0.5,0.7,0.9,0.95,1.0"
+
+# Uncomment and set to remove outlier samples before alignment.
+# The file should contain one sample name per line. Sample names are the FASTA
+# basename (without extension) — check results/ska2/skf/ from stage 1 to
+# confirm exact names, or run: ska nk results/01_build/ska2/merged.skf
+# ska_delete_samples: "outliers.txt"
+
+# Skip IQ-TREE; alignment and Gubbins still run on all branches so you can
+# inspect recombination predictions before committing to tree inference.
+skip_iqtree: true

@@ -1,0 +1,33 @@
+# Stage 1 — Build merged SKF and run FastANI
+#
+# Purpose: convert all input genomes to split-kmer files, merge them into a
+# single .skf, and run all-vs-all FastANI. No alignment is performed.
+#
+# Outputs to check before proceeding:
+#   results/ska2/merged.skf              — pass to --ska_merged_skf in later stages
+#   results/fastani/fastani.txt          — pairwise ANI table
+#   results/nj_tree/fastani_nj.nwk       — quick NJ tree; look for outliers
+#   results/ska2/skf/                    — per-sample .skf files; basenames here
+#                                          are the sample names stored in the SKF
+#                                          (used with --ska_delete_samples)
+
+input: "samplesheet.csv"
+outdir: "results/01_build"
+
+# K-mer size. 31 is the default and works well for closely related genomes
+# (e.g. same species). Increase to 41 or 51 if genomes are slightly more
+# diverged and you see spurious k-mer matches.
+ska_k: 31
+
+# Skip alignment and all downstream steps.
+skip_alignment: true
+
+# Optional: also compute pairwise SNP distances and a NJ tree from SKA2.
+# Requires samples to be closely related; enable if you want a SKA2-based
+# distance tree alongside the FastANI one.
+ska_distance: false
+
+# Optional: identify positions left out of the split-kmer graph.
+# Useful as a proxy for highly variable or recombinant regions.
+ska_lo: false
+# ska_lo_reference: "reference.fasta"  # anchor coordinates to a reference

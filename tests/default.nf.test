@@ -1,0 +1,215 @@
+nextflow_pipeline {
+    name "Test Pipeline SUBSPECIES_PHYLOGENY"
+    script "main.nf"
+
+    tag "pipeline"
+
+    test("three B. uniformis genomes") {
+        when {
+            params {
+                input  = "${projectDir}/tests/samplesheets/test.csv"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+
+                // IQ-TREE produced trees for both weed×gubbins combinations
+                { assert path("${params.outdir}/iqtree/no_weed/no_gubbins/min_freq_0.9/tree.treefile").exists() },
+                { assert path("${params.outdir}/iqtree/no_weed/no_gubbins/min_freq_0.9/tree.treefile").text.contains("BU_61") },
+                { assert path("${params.outdir}/iqtree/no_weed/no_gubbins/min_freq_0.9/tree.treefile").text.contains("BU_909") },
+                { assert path("${params.outdir}/iqtree/no_weed/no_gubbins/min_freq_0.9/tree.treefile").text.contains("BU_AN67") },
+                { assert path("${params.outdir}/iqtree/weed/no_gubbins/min_freq_0.9/tree.treefile").exists() },
+                { assert path("${params.outdir}/iqtree/no_weed/gubbins/min_freq_0.9/tree.treefile").exists() },
+                { assert path("${params.outdir}/iqtree/weed/gubbins/min_freq_0.9/tree.treefile").exists() },
+
+                // SKA2 full SNP alignments — 3 sequences in each weed branch
+                { assert path("${params.outdir}/ska2/no_weed/min_freq_0.9/alignment.fasta").exists() },
+                { assert path("${params.outdir}/ska2/no_weed/min_freq_0.9/alignment.fasta")
+                    .readLines().count { it.startsWith('>') } == 3 },
+                { assert path("${params.outdir}/ska2/weed/min_freq_0.9/alignment.fasta").exists() },
+
+                // merged.skf and merged_weeded.skf published for reanalysis
+                { assert path("${params.outdir}/ska2/merged.skf").exists() },
+                { assert path("${params.outdir}/ska2/merged_weeded.skf").exists() },
+
+                // per-sample .skf files published in ska2/skf/
+                { assert new File("${params.outdir}/ska2/skf").listFiles()
+                    .any { it.name.endsWith('.skf') } },
+
+                // snp-sites variable-sites alignments (one per weed branch)
+                { assert path("${params.outdir}/snpsites/no_weed/min_freq_0.9/no_weed_0.9.fas").exists() },
+                { assert path("${params.outdir}/snpsites/weed/min_freq_0.9/weed_0.9.fas").exists() },
+
+                // FastANI all-vs-all result table (3×3 = 9 rows incl. self-comparisons)
+                { assert path("${params.outdir}/fastani/fastani.txt").exists() },
+                { assert path("${params.outdir}/fastani/fastani.txt")
+                    .readLines().size() == 9 },
+
+                // NJ tree from FastANI distances
+                { assert path("${params.outdir}/nj_tree/fastani_nj.nwk").exists() },
+                { assert path("${params.outdir}/nj_tree/fastani_nj.nwk").text.contains("BU_61_NT5381.1") },
+                { assert path("${params.outdir}/nj_tree/fastani_nj.nwk").text.contains("BU_909_NT5401.1") },
+                { assert path("${params.outdir}/nj_tree/fastani_nj.nwk").text.contains("BU_AN67_NT5182.1") },
+
+                // MultiQC report
+                { assert path("${params.outdir}/multiqc/multiqc_report.html").exists() }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub") {
+        options "-stub"
+        when {
+            params {
+                input  = "${projectDir}/tests/samplesheets/test.csv"
+                outdir = "$outputDir"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // + 1 SKA2_WEED + 2 SKA2_ALIGN + 2 SNPSITES + 2 GUBBINS + 4 IQTREE
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 19 tasks
+                { assert workflow.trace.succeeded().size() == 19 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub with delete") {
+        options "-stub"
+        when {
+            params {
+                input               = "${projectDir}/tests/samplesheets/test.csv"
+                outdir              = "$outputDir"
+                ska_delete_samples  = "${projectDir}/tests/data/delete_samples.txt"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // same as default stub + 1 SKA2_DELETE = 20 tasks
+                { assert workflow.trace.succeeded().size() == 20 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub with distance") {
+        options "-stub"
+        when {
+            params {
+                input         = "${projectDir}/tests/samplesheets/test.csv"
+                outdir        = "$outputDir"
+                ska_distance  = true
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // default stub + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 21 tasks
+                { assert workflow.trace.succeeded().size() == 21 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub with lo") {
+        options "-stub"
+        when {
+            params {
+                input    = "${projectDir}/tests/samplesheets/test.csv"
+                outdir   = "$outputDir"
+                ska_lo   = true
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // same as default stub + 1 SKA2_LO = 20 tasks
+                { assert workflow.trace.succeeded().size() == 20 }
+            )
+        }
+    }
+
+    test("resume from merged SKF - stub") {
+        options "-stub"
+        when {
+            params {
+                // No input samplesheet — upstream steps (incl. FastANI + NJ_TREE_FASTANI) are skipped
+                ska_merged_skf = "${projectDir}/tests/data/dummy_merged.skf"
+                outdir         = "$outputDir"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 1 SKA2_WEED + 2 SKA2_ALIGN + 2 SNPSITES + 2 GUBBINS + 4 IQTREE
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 13 tasks
+                { assert workflow.trace.succeeded().size() == 13 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub skip alignment") {
+        options "-stub"
+        when {
+            params {
+                input          = "${projectDir}/tests/samplesheets/test.csv"
+                outdir         = "$outputDir"
+                skip_alignment = true
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 8 tasks
+                { assert workflow.trace.succeeded().size() == 8 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub skip iqtree") {
+        options "-stub"
+        when {
+            params {
+                input       = "${projectDir}/tests/samplesheets/test.csv"
+                outdir      = "$outputDir"
+                skip_iqtree = true
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // + 1 SKA2_WEED + 2 SKA2_ALIGN + 2 SNPSITES + 2 GUBBINS
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 15 tasks
+                { assert workflow.trace.succeeded().size() == 15 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub two min-freq values") {
+        options "-stub"
+        when {
+            params {
+                input              = "${projectDir}/tests/samplesheets/test.csv"
+                outdir             = "$outputDir"
+                ska_align_min_freq = "0.5,0.9"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 3 BUILD + 1 MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI (= 6)
+                // + 1 WEED
+                // + 2 min_freq × 2 weed states × (ALIGN + SNPSITES + GUBBINS) = 12
+                // + 2 min_freq × 2 weed states × 2 gubbins states × IQTREE = 8
+                // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
+                // = 6 + 1 + 12 + 8 + 2 = 29 tasks
+                { assert workflow.trace.succeeded().size() == 29 }
+            )
+        }
+    }
+}
