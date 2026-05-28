@@ -136,6 +136,7 @@ nextflow run main.nf -profile docker \
 | `--ska_k` | `31` | K-mer size for `ska build`. Larger values increase specificity at the cost of sensitivity in more diverged genomes |
 | `--ska_align_min_freq` | `0.9` | Comma-separated list of `--min-freq` values for `ska align`, e.g. `"0.5,0.9,1.0"`. Each value is run as a separate analysis branch |
 | `--skip_alignment` | `false` | Skip `ska align` and all downstream steps. Produces only the merged SKF and FastANI outputs |
+| `--skip_gubbins` | `false` | Skip Gubbins recombination filtering. IQ-TREE runs on snp-sites output only (no gubbins track) |
 | `--skip_iqtree` | `false` | Skip IQ-TREE. Alignment, snp-sites, and Gubbins still run on all branches. Useful for inspecting alignments before tree inference |
 | `--ska_merged_skf` | `null` | Path to a pre-computed `merged.skf`. When set, `ska build`, `ska merge`, and FastANI are skipped |
 | `--ska_delete_samples` | `null` | Path to a plain-text file with one sample name per line. Those samples are removed from the merged SKF before alignment |

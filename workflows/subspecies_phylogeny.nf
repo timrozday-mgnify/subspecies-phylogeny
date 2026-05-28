@@ -122,17 +122,19 @@ workflow SUBSPECIES_PHYLOGENY {
         ch_versions  = ch_versions.mix(SNPSITES.out.versions.first())
         ch_snp_sites = SNPSITES.out.fasta
 
-        // GUBBINS always runs on every alignment branch; its recombination-free
-        // alignment is published and feeds the gubbins IQ-TREE track.
-        GUBBINS(ch_alignment)
-        ch_versions = ch_versions.mix(GUBBINS.out.versions.first())
-        ch_gubbins  = GUBBINS.out.fasta
+        ch_gubbins = Channel.empty()
+        if (!params.skip_gubbins) {
+            GUBBINS(ch_alignment)
+            ch_versions = ch_versions.mix(GUBBINS.out.versions.first())
+            ch_gubbins  = GUBBINS.out.fasta
+        }
 
         if (!params.skip_iqtree) {
             // -----------------------------------------------------------------------
-            // IQ-TREE: two tracks per min_freq combination.
+            // IQ-TREE: one or two tracks per min_freq combination.
             //   no_gubbins: snp-sites FASTA + ascertainment-bias correction (-fconst)
             //   gubbins:    Gubbins filtered_polymorphic_sites.fasta, no -fconst
+            //               (only when skip_gubbins = false)
             // meta.gubbins carries 'no_gubbins' / 'gubbins' into the publishDir closure.
             // meta.constant_sites is only set on the no_gubbins track; its absence
             // makes the ext.args closure emit an empty string for the gubbins track.
@@ -144,11 +146,14 @@ workflow SUBSPECIES_PHYLOGENY {
                     [ meta + [gubbins: 'no_gubbins', constant_sites: cs], [fasta], [] ]
                 }
 
-            ch_iqtree_gubbins = GUBBINS.out.fasta
-                .map { meta, fasta -> [ meta + [gubbins: 'gubbins'], [fasta], [] ] }
+            ch_iqtree_input = params.skip_gubbins
+                ? ch_iqtree_no_gubbins
+                : ch_iqtree_no_gubbins.mix(
+                    ch_gubbins.map { meta, fasta -> [ meta + [gubbins: 'gubbins'], [fasta], [] ] }
+                  )
 
             IQTREE(
-                ch_iqtree_no_gubbins.mix(ch_iqtree_gubbins),
+                ch_iqtree_input,
                 [], [], [], [], [], [], [], [], [], [], [], []
             )
             ch_versions  = ch_versions.mix(IQTREE.out.versions.first())
