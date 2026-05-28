@@ -198,9 +198,6 @@ for mf_dir in sorted(explore_dir.glob("ska2/min_freq_*"),
         'total_alignment_bases': total_bases,
         'per_sample_bases': total_bases // n_seqs if n_seqs else 0,
     })
-_align_cols = ['min_freq', 'n_samples', 'total_alignment_bases', 'per_sample_bases']
-align_df = pd.DataFrame(align_rows, columns=_align_cols) if align_rows else pd.DataFrame(columns=_align_cols)
-
 # --- SNP sites counts per min_freq ----------------------------------
 snp_rows = []
 for mf_dir in sorted(explore_dir.glob("snpsites/min_freq_*"),
@@ -227,12 +224,23 @@ for mf_dir in sorted(explore_dir.glob("snpsites/min_freq_*"),
         'snp_fraction': snp_sites / (constant_sites + snp_sites)
         if (constant_sites + snp_sites) > 0 else np.nan,
     })
-_snp_cols = ['min_freq', 'constant_A', 'constant_C', 'constant_G', 'constant_T',
-             'constant_sites', 'snp_sites', 'total_sites', 'snp_fraction']
-snp_df = pd.DataFrame(snp_rows, columns=_snp_cols) if snp_rows else pd.DataFrame(columns=_snp_cols)
 
-# Merge alignment and snp stats
-stats_df = align_df.merge(snp_df, on='min_freq', how='outer').sort_values('min_freq')
+# Combine alignment and snp stats by min_freq using a dict join to avoid pandas
+# dtype coercion issues that arise when merging an empty DataFrame.
+_all_mf = sorted(set(r['min_freq'] for r in align_rows) | set(r['min_freq'] for r in snp_rows))
+_align_by_mf = {r['min_freq']: r for r in align_rows}
+_snp_by_mf   = {r['min_freq']: r for r in snp_rows}
+_stats_rows  = []
+for mf in _all_mf:
+    row = {'min_freq': mf}
+    row.update(_align_by_mf.get(mf, {}))
+    row.update(_snp_by_mf.get(mf, {}))
+    _stats_rows.append(row)
+_all_stat_cols = ['min_freq', 'n_samples', 'total_alignment_bases', 'per_sample_bases',
+                  'constant_A', 'constant_C', 'constant_G', 'constant_T',
+                  'constant_sites', 'snp_sites', 'total_sites', 'snp_fraction']
+stats_df = (pd.DataFrame(_stats_rows).reindex(columns=_all_stat_cols)
+            if _stats_rows else pd.DataFrame(columns=_all_stat_cols))
 
 # --- Gubbins per-branch statistics ---------------------------------
 gubbins_data = {}
@@ -312,10 +320,26 @@ display(Markdown(f"""
 | Explore results | `{explore_dir.resolve()}` |
 | Samples | {n_samples} |
 | Min-freq values tested | {sorted(stats_df['min_freq'].tolist())} |
+| Alignment files found | {len(align_rows)} |
+| SNP-sites files found | {len(snp_rows)} |
 | Gubbins results available for | {available_gubbins_mf} |
 | Figures saved to | `{figs_dir.resolve()}` |
 | Tables saved to | `{tables_dir.resolve()}` |
 """))
+
+if len(align_rows) == 0:
+    display(HTML(
+        '<div class="callout callout-style-default callout-warning callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        '<div class="callout-title-container flex-fill">No alignment data found</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'<p>No <code>alignment.fasta</code> files were found under '
+        f'<code>{explore_dir.resolve()}/ska2/min_freq_*/</code>. '
+        'Check that <code>explore_dir</code> points to the correct stage-2 results directory '
+        'and that the pipeline ran to completion.</p>'
+        '</div></div>'
+    ))
 ```
 
 ---
