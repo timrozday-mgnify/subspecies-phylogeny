@@ -198,7 +198,8 @@ for mf_dir in sorted(explore_dir.glob("ska2/min_freq_*"),
         'total_alignment_bases': total_bases,
         'per_sample_bases': total_bases // n_seqs if n_seqs else 0,
     })
-align_df = pd.DataFrame(align_rows)
+_align_cols = ['min_freq', 'n_samples', 'total_alignment_bases', 'per_sample_bases']
+align_df = pd.DataFrame(align_rows, columns=_align_cols) if align_rows else pd.DataFrame(columns=_align_cols)
 
 # --- SNP sites counts per min_freq ----------------------------------
 snp_rows = []
@@ -226,7 +227,9 @@ for mf_dir in sorted(explore_dir.glob("snpsites/min_freq_*"),
         'snp_fraction': snp_sites / (constant_sites + snp_sites)
         if (constant_sites + snp_sites) > 0 else np.nan,
     })
-snp_df = pd.DataFrame(snp_rows)
+_snp_cols = ['min_freq', 'constant_A', 'constant_C', 'constant_G', 'constant_T',
+             'constant_sites', 'snp_sites', 'total_sites', 'snp_fraction']
+snp_df = pd.DataFrame(snp_rows, columns=_snp_cols) if snp_rows else pd.DataFrame(columns=_snp_cols)
 
 # Merge alignment and snp stats
 stats_df = align_df.merge(snp_df, on='min_freq', how='outer').sort_values('min_freq')
