@@ -31,8 +31,12 @@ process GUBBINS {
     # Gubbins only accepts ACGTNacgtn-; SKA2 may emit IUPAC ambiguity codes.
     awk '/^>/{print; next} {gsub(/[^ACGTNacgtn-]/, "N"); print}' ${alignment} > gubbins_input.fasta
 
+    # Cap threads at the number of cores visible to the container (e.g. Docker
+    # Desktop may expose fewer cores than Nextflow's task.cpus allocation).
+    threads=\$(( ${task.cpus} < \$(nproc) ? ${task.cpus} : \$(nproc) ))
+
     run_gubbins.py \\
-        --threads ${task.cpus} \\
+        --threads \$threads \\
         --prefix ${prefix} \\
         $args \\
         gubbins_input.fasta

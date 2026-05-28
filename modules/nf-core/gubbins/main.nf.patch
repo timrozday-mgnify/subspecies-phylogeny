@@ -4,7 +4,7 @@
 #
 # Changes vs upstream:
 #   1. Added val(meta) to input and all output tuples. Same motivation as for
-#      snpsites: the pipeline runs Gubbins in parallel across weed × min_freq
+#      snpsites: the pipeline runs Gubbins in parallel across min_freq
 #      combinations and requires meta to keep branches distinct.
 #   2. Bumped container to gubbins 3.4.3 (upstream pins 3.3.5). The 3.3.5
 #      tag is not present in quay.io/biocontainers for the required platform.
@@ -32,6 +32,12 @@
 #      Nextflow changes into the work directory.
 #   9. stub block rewritten to use --prefix-derived filenames and to emit
 #      versions.yml, matching the updated script block.
+#  10. Replaced --threads ${task.cpus} with a shell expression that caps the
+#      thread count at nproc. Gubbins validates --threads against the number
+#      of physical cores visible to the container and aborts if the value
+#      exceeds it (e.g. Docker Desktop exposes fewer cores than Nextflow's
+#      task.cpus allocation). The cap ensures task.cpus == threads used so
+#      no allocated CPUs sit idle.
 
 --- a/modules/nf-core/gubbins/main.nf
 +++ b/modules/nf-core/gubbins/main.nf
