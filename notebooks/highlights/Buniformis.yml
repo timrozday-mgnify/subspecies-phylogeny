@@ -1,0 +1,9 @@
+# Strains to highlight on phylogenetic trees for the Buniformis run.
+# Each entry requires 'name' (exact match to the tip label in the tree).
+# 'label' is shown in the legend and hover tooltip.
+# 'color' is optional; omit to use the default palette.
+
+highlights:
+  - name: AAYH02
+    label: "20HM reference (AAYH02)"
+    color: "#e63946"

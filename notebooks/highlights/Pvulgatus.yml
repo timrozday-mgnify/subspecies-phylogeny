@@ -1,0 +1,6 @@
+# Strains to highlight on phylogenetic trees for the Pvulgatus run.
+
+highlights:
+  - name: CP000139.1
+    label: "20HM reference (CP000139.1)"
+    color: "#e63946"

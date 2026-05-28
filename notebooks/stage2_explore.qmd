@@ -1,0 +1,817 @@
+---
+title: "Stage 2: SKA2 Alignment Exploration"
+date: today
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    theme: cosmo
+    fig-responsive: true
+jupyter: basicpython
+params:
+  build_dir: "../results/01_build"
+  explore_dir: "../results/02_explore"
+  run_name: "pipeline run"
+  highlights_file: ""
+---
+
+<!--
+Render command (use absolute paths — Quarto resolves paths relative to the notebook file):
+
+  conda run -n quarto quarto render \
+      /path/to/subspecies-phylogeny/notebooks/stage2_explore.qmd \
+      -P build_dir:/absolute/path/to/run/results/01_build \
+      -P explore_dir:/absolute/path/to/run/results/02_explore \
+      -P run_name:Buniformis \
+      --output-dir /absolute/path/to/run/notebooks/
+
+  Example for Buniformis:
+
+  conda run -n quarto quarto render \
+      /Users/timrozday/Documents/subspecies-phylogeny/notebooks/stage2_explore.qmd \
+      -P build_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/01_build \
+      -P explore_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/02_explore \
+      -P run_name:Buniformis \
+      --output-dir /Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/notebooks/
+
+Tree visualisation: uses toytree + toyplot (installed in basicpython).
+  Trees are saved as SVG and interactive HTML via toyplot renderers.
+
+Static image export for Plotly figures (PNG/SVG) requires kaleido:
+    mamba install -c conda-forge python-kaleido
+  Without kaleido, interactive HTML files are saved instead.
+-->
+
+```{python}
+#| tags: [parameters]
+#| include: false
+# Default parameter values — overridden by -P flags at render time
+build_dir       = "../results/01_build"
+explore_dir     = "../results/02_explore"
+run_name        = "pipeline run"
+highlights_file = ""
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Imports and parameter setup
+# ============================================================
+import sys
+import warnings
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import yaml
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import toytree
+import toyplot
+import toyplot.html
+import toyplot.svg
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import plotly.io as pio
+import re
+import io
+
+warnings.filterwarnings('ignore')
+
+# Convert injected param strings to Path objects
+build_dir   = Path(build_dir)
+explore_dir = Path(explore_dir)
+run_name    = str(run_name)
+
+# ---- Highlights config -----------------------------------------------
+_DEFAULT_PALETTE = ['#e63946', '#f4a261', '#2a9d8f', '#8338ec', '#fb8500']
+highlights = {}   # name -> {'label': str, 'color': str}
+
+_hf = str(highlights_file).strip()
+if _hf:
+    _path = Path(_hf)
+    if _path.exists():
+        _cfg = yaml.safe_load(_path.read_text()) or {}
+        for i, entry in enumerate(_cfg.get('highlights', [])):
+            name  = str(entry['name'])
+            label = str(entry.get('label', name))
+            color = str(entry.get('color', _DEFAULT_PALETTE[i % len(_DEFAULT_PALETTE)]))
+            highlights[name] = {'label': label, 'color': color}
+
+
+DEFAULT_TIP_COLOR = '#457b9d'
+
+
+def tip_color(name):
+    return highlights[name]['color'] if name in highlights else DEFAULT_TIP_COLOR
+
+# Output directories co-located with the pipeline results
+figs_dir   = explore_dir / "figs"   / "stage2"
+tables_dir = explore_dir / "tables" / "stage2"
+figs_dir.mkdir(parents=True,   exist_ok=True)
+tables_dir.mkdir(parents=True, exist_ok=True)
+
+# ---- Kaleido availability (for Plotly static export) ----------------
+try:
+    import kaleido  # noqa: F401
+    HAS_KALEIDO = True
+except ImportError:
+    HAS_KALEIDO = False
+
+
+def save_fig(fig_plotly, stem):
+    """Save an interactive Plotly figure.
+
+    Saves as interactive HTML always; also saves SVG/PNG if kaleido is
+    installed (mamba install -c conda-forge python-kaleido).
+    """
+    if fig_plotly is None:
+        return
+    fig_plotly.write_html(str(figs_dir / f"{stem}.html"))
+    if HAS_KALEIDO:
+        fig_plotly.write_image(str(figs_dir / f"{stem}.svg"))
+        fig_plotly.write_image(str(figs_dir / f"{stem}.png"), scale=2)
+
+
+PLOTLY_LAYOUT = dict(
+    template='plotly_white',
+    font=dict(family='Arial, sans-serif', size=13),
+)
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Load all data upfront
+# ============================================================
+
+# --- FastANI -------------------------------------------------------
+fastani_path = build_dir / "fastani" / "fastani.txt"
+fastani_df = pd.read_csv(
+    fastani_path, sep='\t',
+    names=['query', 'ref', 'ani', 'mapped_kmers', 'total_kmers']
+)
+# Strip .fa suffix added by FastANI from genome filenames
+for col in ('query', 'ref'):
+    fastani_df[col] = fastani_df[col].str.replace(r'\.fa(sta)?$', '', regex=True)
+
+samples = sorted(fastani_df['query'].unique())
+n_samples = len(samples)
+
+# Build symmetric ANI matrix (fill missing pairs with NaN)
+ani_matrix = fastani_df.pivot_table(index='query', columns='ref',
+                                    values='ani', aggfunc='first')
+# Ensure symmetry: fill any missing (i,j) with (j,i)
+for s in samples:
+    for t in samples:
+        if pd.isna(ani_matrix.loc[s, t]) and not pd.isna(ani_matrix.loc[t, s]):
+            ani_matrix.loc[s, t] = ani_matrix.loc[t, s]
+ani_matrix = ani_matrix.reindex(index=samples, columns=samples)
+
+# --- NJ tree from FastANI ------------------------------------------
+nwk_path = build_dir / "nj_tree" / "fastani_nj.nwk"
+tt = toytree.tree(str(nwk_path))
+tt = tt.ladderize()
+leaf_order = tt.get_tip_labels()
+
+# --- Alignment lengths per min_freq --------------------------------
+align_rows = []
+for mf_dir in sorted(explore_dir.glob("ska2/min_freq_*"),
+                     key=lambda p: float(p.name.split('_')[2])):
+    mf = float(mf_dir.name.split('_')[2])
+    aln = mf_dir / "alignment.fasta"
+    if not aln.exists():
+        continue
+    with open(aln) as fh:
+        n_seqs = sum(1 for l in fh if l.startswith('>'))
+    total_bases = sum(
+        len(l.strip()) for l in open(aln) if not l.startswith('>')
+    )
+    align_rows.append({
+        'min_freq': mf,
+        'n_samples': n_seqs,
+        'total_alignment_bases': total_bases,
+        'per_sample_bases': total_bases // n_seqs if n_seqs else 0,
+    })
+align_df = pd.DataFrame(align_rows)
+
+# --- SNP sites counts per min_freq ----------------------------------
+snp_rows = []
+for mf_dir in sorted(explore_dir.glob("snpsites/min_freq_*"),
+                     key=lambda p: float(p.name.split('_')[2])):
+    mf = float(mf_dir.name.split('_')[2])
+    sites_files = list(mf_dir.glob("*.sites.txt"))
+    fas_files   = list(mf_dir.glob("*.fas"))
+    if not sites_files or not fas_files:
+        continue
+    # sites.txt format: "A,C,G,T" constant counts
+    acgt = list(map(int, sites_files[0].read_text().strip().split(',')))
+    constant_sites = sum(acgt)
+    # count SNP-site columns from the .fas file
+    with open(fas_files[0]) as fh:
+        seqs = [l.strip() for l in fh if not l.startswith('>')]
+    snp_sites = len(seqs[0]) if seqs else 0
+    snp_rows.append({
+        'min_freq': mf,
+        'constant_A': acgt[0], 'constant_C': acgt[1],
+        'constant_G': acgt[2], 'constant_T': acgt[3],
+        'constant_sites': constant_sites,
+        'snp_sites': snp_sites,
+        'total_sites': constant_sites + snp_sites,
+        'snp_fraction': snp_sites / (constant_sites + snp_sites)
+        if (constant_sites + snp_sites) > 0 else np.nan,
+    })
+snp_df = pd.DataFrame(snp_rows)
+
+# Merge alignment and snp stats
+stats_df = align_df.merge(snp_df, on='min_freq', how='outer').sort_values('min_freq')
+
+# --- Gubbins per-branch statistics ---------------------------------
+gubbins_data = {}
+for mf_dir in sorted(explore_dir.glob("gubbins/min_freq_*"),
+                     key=lambda p: float(p.name.split('_')[2])):
+    mf = float(mf_dir.name.split('_')[2])
+    csv_files = list(mf_dir.glob("*.per_branch_statistics.csv"))
+    gff_files = list(mf_dir.glob("*.recombination_predictions.gff"))
+    if not csv_files:
+        continue
+    stats = pd.read_csv(csv_files[0], sep='\t')
+    # Count recombination events from GFF (skip header lines)
+    n_recomb_blocks = 0
+    if gff_files:
+        with open(gff_files[0]) as fh:
+            n_recomb_blocks = sum(
+                1 for l in fh if l.strip() and not l.startswith('#')
+            )
+    gubbins_data[mf] = {'stats': stats, 'n_recomb_blocks': n_recomb_blocks}
+
+available_gubbins_mf = sorted(gubbins_data.keys())
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Helper: toytree rendering
+# ============================================================
+
+def draw_toytree(tt, title=None, tip_font_size='10px', width=900):
+    """Draw a toytree and return (canvas, html_str, svg_str)."""
+    tips        = tt.get_tip_labels()
+    tip_colors  = [tip_color(t) for t in tips]
+    tip_sizes   = [9 if t in highlights else 5 for t in tips]
+
+    # node_sizes / node_colors must span all nodes (tips + internal)
+    n_internal  = tt.nnodes - tt.ntips
+    all_colors  = tip_colors + ['#888888'] * n_internal
+    all_sizes   = tip_sizes  + [0]         * n_internal
+    height      = max(500, tt.ntips * 14)
+
+    canvas, axes, mark = tt.draw(
+        width=width, height=height,
+        tip_labels=True,
+        tip_labels_colors=tip_colors,
+        tip_labels_style={'font-size': tip_font_size},
+        node_sizes=all_sizes,
+        node_colors=all_colors,
+        node_style={'stroke': 'none'},
+        layout='r',
+    )
+    if title:
+        axes.label.text = title
+
+    html_io = io.BytesIO()
+    toyplot.html.render(canvas, html_io)
+    html_str = html_io.getvalue().decode()
+
+    svg_io = io.BytesIO()
+    toyplot.svg.render(canvas, svg_io)
+    svg_str = svg_io.getvalue().decode()
+
+    return canvas, html_str, svg_str
+```
+
+## Run parameters {.unnumbered}
+
+```{python}
+#| echo: false
+from IPython.display import display, Markdown
+
+display(Markdown(f"""
+| Parameter | Value |
+|-----------|-------|
+| Run name | `{run_name}` |
+| Build results | `{build_dir.resolve()}` |
+| Explore results | `{explore_dir.resolve()}` |
+| Samples | {n_samples} |
+| Min-freq values tested | {sorted(stats_df['min_freq'].tolist())} |
+| Gubbins results available for | {available_gubbins_mf} |
+| Figures saved to | `{figs_dir.resolve()}` |
+| Tables saved to | `{tables_dir.resolve()}` |
+"""))
+```
+
+---
+
+## 1. FastANI quality control
+
+FastANI was run all-vs-all across all {n_samples} genomes. The NJ tree and pairwise ANI
+heatmap below help identify potential outliers before proceeding to alignment.
+
+::: {.callout-tip}
+**What to look for:**
+
+- Samples clustering away from the main group in the tree (long branches or separate clades)
+  are candidate outliers — inspect their ANI values in the heatmap.
+- Pairwise ANI < 95 % against most other samples suggests the genome may belong to a
+  different species or subspecies.
+- Groups of samples with notably lower inter-group ANI may indicate sub-populations worth
+  investigating further.
+:::
+
+### 1.1 Neighbour-joining tree
+
+```{python}
+#| echo: false
+from IPython.display import HTML
+
+canvas, html_str, svg_str = draw_toytree(
+    tt, title=f"FastANI NJ tree — {run_name}"
+)
+(figs_dir / "fastani_nj_tree.svg").write_text(svg_str)
+(figs_dir / "fastani_nj_tree.html").write_text(html_str)
+
+display(HTML(html_str))
+```
+
+### 1.2 Pairwise ANI heatmap (ordered by tree)
+
+The rows and columns are ordered by the NJ tree leaf order so that clusters of similar
+samples appear as blocks along the diagonal.
+
+```{python}
+#| echo: false
+# Reorder matrix by tree leaf order (only keep leaves present in matrix)
+ordered = [s for s in leaf_order if s in ani_matrix.index]
+mat = ani_matrix.reindex(index=ordered, columns=ordered)
+
+ani_min = np.nanmin(mat.values[mat.values < 100])  # exclude self-comparisons
+ani_min = max(ani_min - 0.5, 90)                   # clamp floor
+
+ticktext = [f"<b>{s}</b>" if s in highlights else s for s in mat.index.tolist()]
+
+fig_heat = go.Figure(data=go.Heatmap(
+    z=mat.values,
+    x=mat.columns.tolist(),
+    y=mat.index.tolist(),
+    colorscale='Blues',
+    zmin=ani_min,
+    zmax=100,
+    colorbar=dict(title='ANI (%)'),
+    hovertemplate=(
+        'Query: %{y}<br>'
+        'Reference: %{x}<br>'
+        'ANI: %{z:.4f}%'
+        '<extra></extra>'
+    ),
+))
+fig_heat.update_layout(
+    **PLOTLY_LAYOUT,
+    title=f"Pairwise FastANI — {run_name}",
+    xaxis=dict(tickfont=dict(size=8), tickangle=-45,
+               ticktext=ticktext, tickvals=mat.columns.tolist()),
+    yaxis=dict(tickfont=dict(size=8), autorange='reversed',
+               ticktext=ticktext, tickvals=mat.index.tolist()),
+    height=max(600, n_samples * 13),
+    width=max(650, n_samples * 13),
+    margin=dict(l=160, b=160),
+)
+save_fig(fig_heat, "fastani_heatmap")
+fig_heat.show()
+```
+
+### 1.3 ANI summary statistics
+
+```{python}
+#| echo: false
+# Off-diagonal only
+mask = np.ones(mat.shape, dtype=bool)
+np.fill_diagonal(mask, False)
+off_diag = mat.values[mask]
+off_diag = off_diag[~np.isnan(off_diag)]
+
+ani_stats = pd.DataFrame({
+    'Statistic': ['Min ANI (%)', 'Mean ANI (%)', 'Median ANI (%)',
+                  'Max ANI (%)', 'Std dev (%)'],
+    'Value': [
+        f"{off_diag.min():.4f}",
+        f"{off_diag.mean():.4f}",
+        f"{np.median(off_diag):.4f}",
+        f"{off_diag.max():.4f}",
+        f"{off_diag.std():.4f}",
+    ]
+})
+# Per-sample mean ANI against all others
+per_sample = mat.copy()
+np.fill_diagonal(per_sample.values, np.nan)
+sample_mean_ani = per_sample.mean(axis=1).sort_values(ascending=True)
+sample_ani_df = sample_mean_ani.reset_index()
+sample_ani_df.columns = ['Sample', 'Mean ANI (%) vs others']
+sample_ani_df['Mean ANI (%) vs others'] = sample_ani_df['Mean ANI (%) vs others'].round(4)
+
+ani_stats.to_csv(tables_dir / "fastani_summary_stats.csv", index=False)
+sample_ani_df.to_csv(tables_dir / "fastani_per_sample_mean_ani.csv", index=False)
+
+display(Markdown("**Summary statistics (all pairwise, self excluded):**"))
+display(ani_stats.to_html(index=False, classes='table table-sm table-hover'))
+display(Markdown(""))
+display(Markdown("**Per-sample mean ANI against all others** (lowest first — potential outliers at top):"))
+display(sample_ani_df.head(20).to_html(index=False, classes='table table-sm table-hover'))
+```
+
+---
+
+## 2. Alignment statistics across `--min-freq` values
+
+`ska align --min-freq X` includes only genome positions present in ≥ X × 100 % of samples.
+Lower values retain more positions (including accessory/variable regions) with more
+potential missing data per sample; higher values give a smaller but more complete alignment.
+
+::: {.callout-tip}
+**What to look for:**
+
+- A steep drop in alignment length between two thresholds suggests many positions that are
+  present in most but not all samples — these positions contribute most to the accessory genome.
+- A plateau in SNP count at higher min_freq indicates diminishing informative sites in the
+  strict core; if SNP count drops too low, IQ-TREE may have too little signal for a well-resolved tree.
+- The fraction of variable sites (`SNP fraction`) should stay reasonable (≥ 0.1 % is typical).
+- Choose a threshold where alignment length is sufficient for phylogenetics but missing data
+  is not inflating the analysis. Inspect `gubbins/min_freq_*/` outputs for recombination
+  predictions at candidate thresholds.
+:::
+
+```{python}
+#| include: false
+# Build summary table
+table_df = stats_df[['min_freq', 'n_samples', 'per_sample_bases',
+                      'snp_sites', 'constant_sites', 'snp_fraction']].copy()
+table_df.columns = ['min_freq', 'N samples', 'Alignment length / sample (bp)',
+                    'Variable sites', 'Constant sites', 'Variable fraction']
+table_df['Variable fraction'] = table_df['Variable fraction'].map('{:.4f}'.format)
+table_df.to_csv(tables_dir / "alignment_stats.csv", index=False)
+```
+
+### 2.1 Statistics table
+
+```{python}
+#| echo: false
+display(table_df.to_html(index=False, classes='table table-sm table-hover'))
+```
+
+### 2.2 Alignment length and SNP count vs min-freq
+
+```{python}
+#| echo: false
+mf_vals = stats_df['min_freq'].tolist()
+
+fig_aln = make_subplots(
+    rows=2, cols=1, shared_xaxes=True,
+    subplot_titles=(
+        "Alignment length per sample",
+        "Variable sites (SNP columns)",
+    ),
+    vertical_spacing=0.12,
+)
+fig_aln.add_trace(
+    go.Bar(
+        x=mf_vals,
+        y=stats_df['per_sample_bases'],
+        marker_color='steelblue',
+        hovertemplate='min_freq=%{x}<br>Length=%{y:,} bp<extra></extra>',
+    ),
+    row=1, col=1,
+)
+fig_aln.add_trace(
+    go.Bar(
+        x=mf_vals,
+        y=stats_df['snp_sites'],
+        marker_color='darkorange',
+        hovertemplate='min_freq=%{x}<br>SNP sites=%{y:,}<extra></extra>',
+    ),
+    row=2, col=1,
+)
+fig_aln.update_layout(
+    **PLOTLY_LAYOUT,
+    title=f"Alignment statistics — {run_name}",
+    showlegend=False,
+    height=500,
+)
+fig_aln.update_xaxes(title_text='min_freq', row=2, col=1,
+                     tickvals=mf_vals, ticktext=[str(v) for v in mf_vals])
+fig_aln.update_yaxes(title_text='bp / sample', row=1, col=1)
+fig_aln.update_yaxes(title_text='SNP columns', row=2, col=1)
+save_fig(fig_aln, "alignment_length_and_snps")
+fig_aln.show()
+```
+
+### 2.3 Site composition breakdown
+
+Each bar shows the proportion of constant (A, C, G, T) vs variable sites at each threshold.
+
+```{python}
+#| echo: false
+fig_comp = go.Figure()
+bar_kwargs = dict(x=mf_vals, barmode='stack')
+palette = {'A': '#4daf4a', 'C': '#377eb8', 'G': '#e41a1c', 'T': '#ff7f00', 'SNP': '#984ea3'}
+for base in ('A', 'C', 'G', 'T'):
+    fig_comp.add_trace(go.Bar(
+        name=f'Constant {base}',
+        x=mf_vals,
+        y=stats_df[f'constant_{base}'],
+        marker_color=palette[base],
+        hovertemplate=f'min_freq=%{{x}}<br>Constant {base}=%{{y:,}}<extra></extra>',
+    ))
+fig_comp.add_trace(go.Bar(
+    name='Variable (SNP)',
+    x=mf_vals,
+    y=stats_df['snp_sites'],
+    marker_color=palette['SNP'],
+    hovertemplate='min_freq=%{x}<br>SNP sites=%{y:,}<extra></extra>',
+))
+fig_comp.update_layout(
+    **PLOTLY_LAYOUT,
+    barmode='stack',
+    title=f"Site composition — {run_name}",
+    xaxis=dict(title='min_freq', tickvals=mf_vals,
+               ticktext=[str(v) for v in mf_vals]),
+    yaxis_title='Sites per sample',
+    height=420,
+)
+save_fig(fig_comp, "site_composition")
+fig_comp.show()
+```
+
+### 2.4 Variable-site fraction vs min-freq
+
+```{python}
+#| echo: false
+fig_frac = go.Figure(go.Scatter(
+    x=mf_vals,
+    y=(stats_df['snp_fraction'] * 100).tolist(),
+    mode='lines+markers',
+    marker=dict(size=9, color='steelblue'),
+    line=dict(width=2),
+    hovertemplate='min_freq=%{x}<br>Variable fraction=%{y:.3f}%<extra></extra>',
+))
+fig_frac.update_layout(
+    **PLOTLY_LAYOUT,
+    title=f"Fraction of variable sites — {run_name}",
+    xaxis=dict(title='min_freq', tickvals=mf_vals,
+               ticktext=[str(v) for v in mf_vals]),
+    yaxis_title='Variable sites / total sites (%)',
+    height=350,
+)
+save_fig(fig_frac, "variable_site_fraction")
+fig_frac.show()
+```
+
+---
+
+## 3. Gubbins recombination detection
+
+Gubbins was run on the subset of min_freq values that completed before this report was
+generated. Results are available for: **`{available_gubbins_mf}`**.
+
+::: {.callout-note}
+Min-freq values with no Gubbins result directory were still running or did not complete.
+:::
+
+```{python}
+#| include: false
+# Build combined per-sample recombination table for all available min_freq values
+tip_dfs = []
+for mf, d in gubbins_data.items():
+    df = d['stats'].copy()
+    # Keep only tip nodes (internal nodes have names like Node_*)
+    df = df[~df['Node'].str.match(r'^Node_\d+$', na=False)].copy()
+    df['min_freq'] = mf
+    df['n_recomb_blocks_total'] = d['n_recomb_blocks']
+    tip_dfs.append(df)
+
+recomb_df = pd.concat(tip_dfs, ignore_index=True) if tip_dfs else pd.DataFrame()
+recomb_df.to_csv(tables_dir / "gubbins_per_sample.csv", index=False)
+```
+
+### 3.1 Recombination events detected
+
+```{python}
+#| echo: false
+summary_rows = []
+for mf, d in sorted(gubbins_data.items()):
+    summary_rows.append({
+        'min_freq': mf,
+        'Recombination blocks in GFF': d['n_recomb_blocks'],
+        'Samples in analysis': (~d['stats']['Node'].str.match(r'^Node_\d+$', na=False)).sum(),
+    })
+summary_gub = pd.DataFrame(summary_rows)
+summary_gub.to_csv(tables_dir / "gubbins_summary.csv", index=False)
+display(summary_gub.to_html(index=False, classes='table table-sm table-hover'))
+```
+
+```{python}
+#| echo: false
+if not recomb_df.empty and recomb_df['Number of Recombination Blocks'].sum() == 0:
+    display(Markdown(
+        "> **Gubbins detected no recombination events at any tested min_freq threshold.**\n"
+        "> This can indicate a genuinely clonal population, or that the `--min-snps` "
+        "> threshold is too high for the diversity present. "
+        "> Try lowering `--min-snps` in Stage 3 if recombination is expected."
+    ))
+```
+
+### 3.2 Total SNPs per sample (Gubbins tree annotation)
+
+Even when no recombination is detected, the per-branch SNP counts from Gubbins' internal
+tree are informative — samples with unusually high SNP counts may be divergent or
+mis-assembled.
+
+```{python}
+#| echo: false
+if not recomb_df.empty:
+    figs_snp = []
+    for mf in sorted(recomb_df['min_freq'].unique()):
+        sub = recomb_df[recomb_df['min_freq'] == mf].sort_values(
+            'Total SNPs', ascending=True
+        )
+        figs_snp.append(
+            go.Bar(
+                name=f'min_freq={mf}',
+                x=sub['Total SNPs'],
+                y=sub['Node'],
+                orientation='h',
+                hovertemplate='%{y}<br>Total SNPs: %{x:,}<extra></extra>',
+                visible=(mf == sorted(recomb_df['min_freq'].unique())[0]),
+            )
+        )
+    fig_snps = go.Figure(data=figs_snp)
+
+    mf_buttons = [
+        dict(
+            label=f'min_freq={mf}',
+            method='update',
+            args=[{'visible': [m == mf for m in sorted(recomb_df['min_freq'].unique())]},
+                  {'title': f'Total SNPs per sample — min_freq={mf} — {run_name}'}],
+        )
+        for mf in sorted(recomb_df['min_freq'].unique())
+    ]
+    fig_snps.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f"Total SNPs per sample — min_freq={sorted(recomb_df['min_freq'].unique())[0]} — {run_name}",
+        xaxis_title='Total SNPs (Gubbins per-branch count)',
+        yaxis=dict(tickfont=dict(size=9)),
+        height=max(500, len(sub) * 14 + 100),
+        updatemenus=[dict(
+            buttons=mf_buttons,
+            direction='down', showactive=True, x=0.01, y=1.12, xanchor='left',
+        )],
+        margin=dict(l=180),
+    )
+    save_fig(fig_snps, "gubbins_total_snps_per_sample")
+    fig_snps.show()
+```
+
+### 3.3 r/m ratio per sample
+
+The r/m ratio is the ratio of substitutions introduced by recombination to those introduced
+by point mutation. Higher values indicate heavier recombination influence on a lineage.
+Values are 0 when no recombination is detected.
+
+```{python}
+#| echo: false
+if not recomb_df.empty:
+    rm_figs = []
+    for mf in sorted(recomb_df['min_freq'].unique()):
+        sub = recomb_df[recomb_df['min_freq'] == mf].sort_values('r/m', ascending=True)
+        rm_figs.append(go.Bar(
+            name=f'min_freq={mf}',
+            x=sub['r/m'],
+            y=sub['Node'],
+            orientation='h',
+            hovertemplate='%{y}<br>r/m: %{x:.4f}<extra></extra>',
+            visible=(mf == sorted(recomb_df['min_freq'].unique())[0]),
+        ))
+    fig_rm = go.Figure(data=rm_figs)
+    fig_rm.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f"r/m ratio — min_freq={sorted(recomb_df['min_freq'].unique())[0]} — {run_name}",
+        xaxis_title='r/m ratio',
+        yaxis=dict(tickfont=dict(size=9)),
+        height=max(500, len(sub) * 14 + 100),
+        updatemenus=[dict(
+            buttons=mf_buttons,
+            direction='down', showactive=True, x=0.01, y=1.12, xanchor='left',
+        )],
+        margin=dict(l=180),
+    )
+    save_fig(fig_rm, "gubbins_rm_ratio")
+    fig_rm.show()
+```
+
+### 3.4 Bases in clonal frame vs genome length
+
+```{python}
+#| echo: false
+if not recomb_df.empty:
+    cf_figs = []
+    for mf in sorted(recomb_df['min_freq'].unique()):
+        sub = (
+            recomb_df[recomb_df['min_freq'] == mf]
+            .assign(clonal_pct=lambda d:
+                    100 * d['Bases in Clonal Frame'] / d['Genome Length'].replace(0, np.nan))
+            .sort_values('clonal_pct')
+        )
+        cf_figs.append(go.Bar(
+            name=f'min_freq={mf}',
+            x=sub['clonal_pct'],
+            y=sub['Node'],
+            orientation='h',
+            hovertemplate=(
+                '%{y}<br>'
+                'Clonal frame: %{x:.1f}%<br>'
+                '<extra></extra>'
+            ),
+            visible=(mf == sorted(recomb_df['min_freq'].unique())[0]),
+        ))
+    fig_cf = go.Figure(data=cf_figs)
+    fig_cf.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f"Clonal frame coverage — min_freq={sorted(recomb_df['min_freq'].unique())[0]} — {run_name}",
+        xaxis=dict(title='Clonal frame (% of genome length)', range=[0, 105]),
+        yaxis=dict(tickfont=dict(size=9)),
+        height=max(500, len(sub) * 14 + 100),
+        updatemenus=[dict(
+            buttons=mf_buttons,
+            direction='down', showactive=True, x=0.01, y=1.12, xanchor='left',
+        )],
+        margin=dict(l=180),
+    )
+    save_fig(fig_cf, "gubbins_clonal_frame")
+    fig_cf.show()
+```
+
+---
+
+## 4. Suggested additional diagnostics
+
+The following diagnostics are not yet implemented in this report but are recommended
+for a thorough stage-2 assessment:
+
+**Per-sample completeness across min-freq**
+:   For each sample and each min-freq threshold, compute the fraction of alignment
+    positions that are non-gap/non-N. This reveals which samples drive missing-data
+    inflation at a given threshold and may flag poorly assembled or contaminated
+    genomes. Requires reading the full SKA2 alignment FASTA files (~100–200 MB each);
+    the `pyfastx` package (available in this env) makes this fast.
+
+**Pairwise SNP distance matrix**
+:   Run with `--ska_distance true` to obtain `ska2/distances.tsv` and a NJ tree based
+    on raw SNP counts rather than ANI. This is complementary to FastANI and more
+    sensitive within closely related samples. Can be visualised with the same
+    Plotly heatmap approach used above.
+
+**ANI vs SNP distance scatter**
+:   Plot pairwise ANI (from FastANI) against pairwise SNP distance (from `ska distance`)
+    for each sample pair. Outlier pairs that have high ANI but unexpectedly high SNP
+    distance may indicate assembly artefacts or recent recombination.
+
+**Missing data per sample at chosen min-freq**
+:   A bar chart of the number of gap/N positions per sample at the candidate min-freq
+    threshold. Samples with >5–10 % missing data are candidates for removal via
+    `--ska_delete_samples` before stage 3.
+
+**Gubbins tree topology concordance**
+:   Compare the topology of the Gubbins final tree (`*.final_tree.tre`) with the FastANI
+    NJ tree using a normalised Robinson–Foulds distance (`Bio.Phylo` provides this).
+    Large disagreements may indicate recombination obscuring true genealogy.
+
+**Recombination block size distribution**
+:   Parse `*.recombination_predictions.gff` to extract block lengths when recombination
+    is present. A histogram of block sizes helps assess whether Gubbins is calling
+    many short (potentially spurious) blocks or a few large (biologically plausible) ones.
+
+**Genome-length outlier check**
+:   Compare the `Genome Length` column from Gubbins per-branch statistics. Genomes
+    significantly shorter or longer than the mean may be fragmented assemblies or
+    contain contamination.
+
+```{python}
+#| include: false
+# Save the main stats table for downstream use
+stats_df.to_csv(tables_dir / "alignment_stats_full.csv", index=False)
+print(f"Figures saved to: {figs_dir.resolve()}")
+print(f"Tables saved to:  {tables_dir.resolve()}")
+```

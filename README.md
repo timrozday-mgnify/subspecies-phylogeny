@@ -317,6 +317,77 @@ isolate_C,/path/to/isolate_C.fasta
 
 ---
 
+## Generating reports
+
+Two Quarto reports are provided in `notebooks/` to explore and interpret pipeline results interactively. They are rendered with [Quarto](https://quarto.org/) using the `basicpython` conda kernel and require the `quarto` conda environment for rendering.
+
+**Prerequisites:**
+
+```bash
+# quarto env needs papermill to inject -P parameters
+pip install papermill          # or: conda install -c conda-forge papermill
+
+# basicpython kernel needs: numpy pandas yaml toytree toyplot plotly
+# Optional for static SVG/PNG export of Plotly figures:
+mamba install -n basicpython -c conda-forge python-kaleido
+```
+
+### Highlights config
+
+Strains to mark on trees and charts are defined in a YAML file rather than as command-line strings. Example files are in `notebooks/highlights/`:
+
+```yaml
+# notebooks/highlights/MyRun.yml
+highlights:
+  - name: AAYH02            # exact tip label as it appears in the tree
+    label: "20HM reference" # shown in legend / tooltip
+    color: "#e63946"        # optional; defaults to a built-in palette
+  - name: BU_61_NT5381.1
+    label: "Close relative"
+```
+
+Pass the **absolute path** to the file via `-P highlights_file:...`.
+
+### Stage 2 — Explore min-freq values
+
+```bash
+conda run -n quarto quarto render \
+    /path/to/subspecies-phylogeny/notebooks/stage2_explore.qmd \
+    -P build_dir:/absolute/path/to/run/results/01_build \
+    -P explore_dir:/absolute/path/to/run/results/02_explore \
+    -P run_name:MyRun \
+    -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
+    --output-dir /absolute/path/to/run/notebooks/
+```
+
+Quarto resolves `-P` paths relative to the **notebook file**, not the working directory, so absolute paths are required for `build_dir`, `explore_dir`, and `highlights_file`.
+
+### Stage 4 — Final phylogeny
+
+```bash
+conda run -n quarto quarto render \
+    /path/to/subspecies-phylogeny/notebooks/stage4_final.qmd \
+    -P build_dir:/absolute/path/to/run/results/01_build \
+    -P final_dir:/absolute/path/to/run/results/04_final \
+    -P run_name:MyRun \
+    -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
+    -P min_freq:0.95 \
+    --output-dir /absolute/path/to/run/notebooks/
+```
+
+| Parameter | Description |
+|---|---|
+| `build_dir` | Stage 1 results directory (`01_build`) |
+| `explore_dir` | Stage 2 results directory (`02_explore`) — stage 2 report only |
+| `final_dir` | Stage 4 results directory (`04_final`) — stage 4 report only |
+| `run_name` | Label shown in figure titles |
+| `highlights_file` | Path to highlights YAML (see above); omit to render without highlighting |
+| `min_freq` | The `--min-freq` value used for the final run; selects which subdirectory to read — stage 4 report only |
+
+Rendered HTML files are self-contained (`embed-resources: true`) and can be shared without additional assets. Figures and tables are also saved to `results/<stage>/figs/stage<N>/` and `results/<stage>/tables/stage<N>/` respectively.
+
+---
+
 ## Requirements
 
 - [Nextflow](https://nextflow.io/) ≥ 25.0

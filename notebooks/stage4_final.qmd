@@ -1,0 +1,558 @@
+---
+title: "Stage 4: Final Phylogeny"
+date: today
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    theme: cosmo
+    fig-responsive: true
+jupyter: basicpython
+params:
+  build_dir: "../results/01_build"
+  final_dir: "../results/04_final"
+  run_name: "pipeline run"
+  highlights_file: ""
+  min_freq: "0.95"
+---
+
+<!--
+Render command (use absolute paths — Quarto resolves paths relative to the notebook file):
+
+  conda run -n quarto quarto render \
+      /path/to/subspecies-phylogeny/notebooks/stage4_final.qmd \
+      -P build_dir:/absolute/path/to/run/results/01_build \
+      -P final_dir:/absolute/path/to/run/results/04_final \
+      -P run_name:MyRun \
+      -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
+      -P min_freq:0.95 \
+      --output-dir /absolute/path/to/run/notebooks/
+
+See notebooks/highlights/ for example highlights YAML files and their format.
+
+Tree visualisation: uses toytree + toyplot (installed in basicpython).
+  Trees are saved as SVG and interactive HTML via toyplot renderers.
+
+Static image export for Plotly figures (PNG/SVG) requires kaleido:
+    mamba install -c conda-forge python-kaleido
+  Without kaleido, interactive HTML files are saved instead.
+-->
+
+```{python}
+#| tags: [parameters]
+#| include: false
+# Default parameter values — overridden by -P flags at render time
+build_dir       = "../results/01_build"
+final_dir       = "../results/04_final"
+run_name        = "pipeline run"
+highlights_file = ""
+min_freq        = "0.95"
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Imports and setup
+# ============================================================
+import warnings
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import yaml
+import toytree
+import toyplot
+import toyplot.html
+import toyplot.svg
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import io
+import re
+
+warnings.filterwarnings('ignore')
+
+build_dir = Path(build_dir)
+final_dir = Path(final_dir)
+run_name  = str(run_name)
+min_freq  = str(min_freq).strip()
+
+figs_dir   = final_dir / "figs"   / "stage4"
+tables_dir = final_dir / "tables" / "stage4"
+figs_dir.mkdir(parents=True, exist_ok=True)
+tables_dir.mkdir(parents=True, exist_ok=True)
+
+try:
+    import kaleido  # noqa: F401
+    HAS_KALEIDO = True
+except ImportError:
+    HAS_KALEIDO = False
+
+
+def save_fig(fig_plotly, stem):
+    if fig_plotly is None:
+        return
+    fig_plotly.write_html(str(figs_dir / f"{stem}.html"))
+    if HAS_KALEIDO:
+        fig_plotly.write_image(str(figs_dir / f"{stem}.svg"))
+        fig_plotly.write_image(str(figs_dir / f"{stem}.png"), scale=2)
+
+
+def save_tree(html_str, svg_str, stem):
+    (figs_dir / f"{stem}.html").write_text(html_str)
+    (figs_dir / f"{stem}.svg").write_text(svg_str)
+
+
+PLOTLY_LAYOUT = dict(
+    template='plotly_white',
+    font=dict(family='Arial, sans-serif', size=13),
+)
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Load highlights config
+# ============================================================
+# Default palette cycled when a highlight entry has no explicit color
+_DEFAULT_PALETTE = ['#e63946', '#f4a261', '#2a9d8f', '#8338ec', '#fb8500']
+
+highlights = {}   # name -> {'label': str, 'color': str}
+
+_hf = str(highlights_file).strip()
+if _hf:
+    _path = Path(_hf)
+    if _path.exists():
+        _cfg = yaml.safe_load(_path.read_text()) or {}
+        for i, entry in enumerate(_cfg.get('highlights', [])):
+            name  = str(entry['name'])
+            label = str(entry.get('label', name))
+            color = str(entry.get('color', _DEFAULT_PALETTE[i % len(_DEFAULT_PALETTE)]))
+            highlights[name] = {'label': label, 'color': color}
+    else:
+        import warnings as _w
+        _w.warn(f"highlights_file not found: {_path}")
+
+
+DEFAULT_TIP_COLOR  = '#457b9d'
+DEFAULT_TIP_SIZE   = 5
+HIGHLIGHT_TIP_SIZE = 9
+
+
+def tip_color(name):
+    return highlights[name]['color'] if name in highlights else DEFAULT_TIP_COLOR
+
+
+def tip_size(name):
+    return HIGHLIGHT_TIP_SIZE if name in highlights else DEFAULT_TIP_SIZE
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Locate files for the chosen min_freq
+# ============================================================
+mf_label = f"min_freq_{min_freq}"
+
+iqtree_no_gubbins_dir = final_dir / "iqtree" / "no_gubbins" / mf_label
+iqtree_gubbins_dir    = final_dir / "iqtree" / "gubbins"    / mf_label
+gubbins_dir           = final_dir / "gubbins" / mf_label
+
+HAS_GUBBINS_TREE = (iqtree_gubbins_dir / "tree.treefile").exists()
+HAS_GUBBINS_OUT  = gubbins_dir.exists() and any(gubbins_dir.glob("*.per_branch_statistics.csv"))
+
+
+def load_iqtree_meta(iqtree_file):
+    meta = {}
+    if not iqtree_file.exists():
+        return meta
+    text = iqtree_file.read_text()
+    for label, pattern in [
+        ('n_sequences',   r'Input data:\s+(\d+) sequences'),
+        ('n_sites',       r'Input data:.*with (\d+) nucleotide sites'),
+        ('model',         r'Model of substitution:\s+(\S+)'),
+        ('log_likelihood',r'Log-likelihood of the tree:\s+([-\d.]+)'),
+        ('tree_length',   r'Total tree length \(sum of branch lengths\):\s+([\d.]+)'),
+        ('constant_sites',r'Number of constant sites:\s+(\d+)'),
+        ('parsimony_inf', r'Number of parsimony informative sites:\s+(\d+)'),
+    ]:
+        m = re.search(pattern, text)
+        if m:
+            meta[label] = m.group(1)
+    return meta
+
+
+no_gubbins_meta = load_iqtree_meta(iqtree_no_gubbins_dir / "tree.iqtree")
+gubbins_meta    = load_iqtree_meta(iqtree_gubbins_dir    / "tree.iqtree") if HAS_GUBBINS_TREE else {}
+
+
+def load_gubbins_stats():
+    if not HAS_GUBBINS_OUT:
+        return None
+    csv_files = list(gubbins_dir.glob("*.per_branch_statistics.csv"))
+    df = pd.read_csv(csv_files[0], sep='\t')
+    return df[~df['Node'].str.match(r'^Node_\d+$', na=False)].copy()
+
+
+gubbins_stats = load_gubbins_stats()
+
+n_recomb_blocks = 0
+if HAS_GUBBINS_OUT:
+    gff_files = list(gubbins_dir.glob("*.recombination_predictions.gff"))
+    if gff_files:
+        with open(gff_files[0]) as fh:
+            n_recomb_blocks = sum(1 for l in fh if l.strip() and not l.startswith('#'))
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Tree drawing helpers
+# ============================================================
+
+def _tip_style_lists(tt):
+    tips = tt.get_tip_labels()
+    colors = [tip_color(t) for t in tips]
+    sizes  = [tip_size(t)  for t in tips]
+    return tips, colors, sizes
+
+
+def _support_node_style(tt):
+    """Per-node colours and sizes for internal bootstrap nodes."""
+    tips_set = set(tt.get_tip_labels())
+    node_colors, node_sizes = [], []
+    node_data = tt.get_node_data()
+    has_support = 'support' in node_data.columns
+
+    for i in range(tt.nnodes):
+        name = node_data['name'].iloc[i] if 'name' in node_data.columns else ''
+        if name in tips_set or i < tt.ntips:
+            node_colors.append(tip_color(str(name)))
+            node_sizes.append(tip_size(str(name)))
+        else:
+            sup = node_data['support'].iloc[i] if has_support else None
+            if sup is None or pd.isna(sup):
+                node_colors.append('#aaaaaa'); node_sizes.append(0)
+            elif sup >= 95:
+                node_colors.append('#2d6a4f'); node_sizes.append(6)
+            elif sup >= 70:
+                node_colors.append('#f4a261'); node_sizes.append(5)
+            else:
+                node_colors.append('#aaaaaa'); node_sizes.append(0)
+    return node_colors, node_sizes
+
+
+def _render_toytree(canvas):
+    html_io = io.BytesIO()
+    toyplot.html.render(canvas, html_io)
+    svg_io  = io.BytesIO()
+    toyplot.svg.render(canvas, svg_io)
+    return html_io.getvalue().decode(), svg_io.getvalue().decode()
+
+
+def draw_toytree_with_support(tt, title=None, tip_font_size='10px', width=950):
+    tips, tip_colors, _ = _tip_style_lists(tt)
+    node_colors, node_sizes = _support_node_style(tt)
+    height = max(500, tt.ntips * 14)
+
+    canvas, axes, _ = tt.draw(
+        width=width, height=height,
+        layout='r', scalebar=True,
+        tip_labels=True,
+        tip_labels_colors=tip_colors,
+        tip_labels_style={'font-size': tip_font_size},
+        node_sizes=node_sizes,
+        node_colors=node_colors,
+        node_style={'stroke': 'none'},
+    )
+    if title:
+        axes.label.text = title
+    return _render_toytree(canvas)
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Load and render trees
+# ============================================================
+tt_no_gubbins = tt_gubbins = None
+tt_no_gubbins_html = tt_no_gubbins_svg = ""
+tt_gubbins_html    = tt_gubbins_svg    = ""
+
+if (iqtree_no_gubbins_dir / "tree.treefile").exists():
+    tt_no_gubbins = toytree.tree(str(iqtree_no_gubbins_dir / "tree.treefile")).ladderize()
+    tt_no_gubbins_html, tt_no_gubbins_svg = draw_toytree_with_support(
+        tt_no_gubbins,
+        title=f"IQ-TREE ML — no Gubbins masking — {run_name} (min_freq={min_freq})"
+    )
+    save_tree(tt_no_gubbins_html, tt_no_gubbins_svg, "iqtree_no_gubbins")
+
+if HAS_GUBBINS_TREE:
+    tt_gubbins = toytree.tree(str(iqtree_gubbins_dir / "tree.treefile")).ladderize()
+    tt_gubbins_html, tt_gubbins_svg = draw_toytree_with_support(
+        tt_gubbins,
+        title=f"IQ-TREE ML — Gubbins-masked — {run_name} (min_freq={min_freq})"
+    )
+    save_tree(tt_gubbins_html, tt_gubbins_svg, "iqtree_gubbins")
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Run parameters summary table
+# ============================================================
+highlight_summary = (
+    "; ".join(f"{n} ({v['label']})" for n, v in highlights.items())
+    if highlights else "none"
+)
+rows = [
+    ("Run name",               run_name),
+    ("min-freq",               min_freq),
+    ("Sequences",              no_gubbins_meta.get('n_sequences', '—')),
+    ("Alignment length",       no_gubbins_meta.get('n_sites', '—')),
+    ("Constant sites",         no_gubbins_meta.get('constant_sites', '—')),
+    ("Parsimony-inf. sites",   no_gubbins_meta.get('parsimony_inf', '—')),
+    ("Substitution model",     no_gubbins_meta.get('model', '—')),
+    ("Log-likelihood",         no_gubbins_meta.get('log_likelihood', '—')),
+    ("Tree length",            no_gubbins_meta.get('tree_length', '—')),
+    ("Gubbins recomb. blocks", str(n_recomb_blocks) if HAS_GUBBINS_OUT else "not run"),
+    ("Gubbins-masked IQ-TREE", "yes" if HAS_GUBBINS_TREE else "no / not run"),
+    ("Highlighted strains",    highlight_summary),
+]
+summary_df = pd.DataFrame(rows, columns=["Parameter", "Value"])
+summary_df.to_csv(tables_dir / "run_summary.csv", index=False)
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Branch-length distribution
+# ============================================================
+fig_bl = None
+if tt_no_gubbins is not None:
+    node_data  = tt_no_gubbins.get_node_data()
+    bl_series  = node_data['dist'].dropna()
+    bl_series  = bl_series[bl_series > 0]
+    tip_labels = set(tt_no_gubbins.get_tip_labels())
+
+    fig_bl = go.Figure()
+    fig_bl.add_trace(go.Histogram(
+        x=bl_series, nbinsx=60,
+        name='All branches',
+        marker_color='#457b9d', opacity=0.75,
+    ))
+    # Vertical lines for each highlighted strain
+    if 'name' in node_data.columns:
+        for name, info in highlights.items():
+            mask = node_data['name'] == name
+            if mask.any():
+                bl_val = node_data.loc[mask, 'dist'].values[0]
+                if bl_val > 0:
+                    fig_bl.add_vline(
+                        x=bl_val,
+                        line_color=info['color'], line_width=2, line_dash='dash',
+                        annotation_text=info['label'],
+                        annotation_position="top right",
+                    )
+    fig_bl.update_layout(
+        title=f"Branch-length distribution — {run_name}",
+        xaxis_title="Branch length (substitutions/site)",
+        yaxis_title="Count",
+        **PLOTLY_LAYOUT,
+    )
+    save_fig(fig_bl, "branch_lengths")
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Gubbins per-tip statistics
+# ============================================================
+fig_gubbins = None
+if gubbins_stats is not None and len(gubbins_stats) > 0:
+    gs = gubbins_stats.sort_values('Total SNPs', ascending=True)
+    tip_names  = gs['Node'].tolist()
+    bar_colors = [tip_color(t) for t in tip_names]
+
+    fig_gubbins = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=["Total SNPs per tip", "SNPs in recombinations per tip"],
+        horizontal_spacing=0.12,
+    )
+    fig_gubbins.add_trace(go.Bar(
+        y=tip_names, x=gs['Total SNPs'],
+        orientation='h', marker_color=bar_colors, name='Total SNPs',
+        hovertemplate='%{y}<br>Total SNPs: %{x}<extra></extra>',
+    ), row=1, col=1)
+    fig_gubbins.add_trace(go.Bar(
+        y=tip_names, x=gs['Number of SNPs Inside Recombinations'],
+        orientation='h', marker_color=bar_colors, name='SNPs in recombinations',
+        hovertemplate='%{y}<br>SNPs in recomb: %{x}<extra></extra>',
+    ), row=1, col=2)
+    fig_gubbins.update_layout(
+        height=max(500, len(gs) * 14),
+        title=f"Gubbins per-tip statistics — {run_name} (min_freq={min_freq})",
+        showlegend=False,
+        **PLOTLY_LAYOUT,
+    )
+    fig_gubbins.update_xaxes(title_text="SNPs", row=1, col=1)
+    fig_gubbins.update_xaxes(title_text="SNPs", row=1, col=2)
+    save_fig(fig_gubbins, "gubbins_per_tip")
+    gubbins_stats.to_csv(tables_dir / "gubbins_per_tip.csv", index=False)
+```
+
+```{python}
+#| include: false
+# ============================================================
+# Pairwise ML distance heatmap
+# ============================================================
+fig_dist = None
+if (iqtree_no_gubbins_dir / "tree.mldist").exists():
+    dist_df = pd.read_csv(
+        iqtree_no_gubbins_dir / "tree.mldist",
+        sep=r'\s+', header=None, skiprows=1, index_col=0,
+    )
+    dist_df.columns = dist_df.index
+
+    if tt_no_gubbins is not None:
+        leaf_order = tt_no_gubbins.get_tip_labels()
+        order = [t for t in leaf_order if t in dist_df.index]
+        dist_df = dist_df.reindex(index=order, columns=order)
+
+    tip_names   = list(dist_df.index)
+    text_matrix = [[f"Query: {r}<br>Ref: {c}<br>Dist: {dist_df.loc[r,c]:.6f}"
+                    for c in tip_names] for r in tip_names]
+    ticktext_x  = [f"<b>{t}</b>" if t in highlights else t for t in tip_names]
+    ticktext_y  = [f"<b>{t}</b>" if t in highlights else t for t in tip_names]
+
+    fig_dist = go.Figure(go.Heatmap(
+        z=dist_df.values, x=tip_names, y=tip_names,
+        text=text_matrix, hoverinfo='text',
+        colorscale='Blues', colorbar=dict(title="ML distance"),
+    ))
+    fig_dist.update_layout(
+        title=f"IQ-TREE pairwise ML distances — {run_name} (min_freq={min_freq})",
+        xaxis=dict(tickfont=dict(size=9), tickangle=45, ticktext=ticktext_x, tickvals=tip_names),
+        yaxis=dict(tickfont=dict(size=9), ticktext=ticktext_y, tickvals=tip_names, autorange='reversed'),
+        height=800,
+        **PLOTLY_LAYOUT,
+    )
+    save_fig(fig_dist, "pairwise_distances")
+    dist_df.to_csv(tables_dir / "pairwise_ml_distances.csv")
+```
+
+## Run summary
+
+```{python}
+#| echo: false
+from IPython.display import display, HTML
+
+display(HTML(summary_df.to_html(index=False, border=0,
+    classes='table table-sm table-striped', justify='left')))
+```
+
+::: {.callout-note}
+**Highlighted strains** (shown in colour on all trees and charts):
+```{python}
+#| echo: false
+if highlights:
+    rows_hl = "".join(
+        f'<tr><td><code>{n}</code></td>'
+        f'<td><span style="color:{v["color"]};font-weight:bold">■</span> {v["label"]}</td></tr>'
+        for n, v in highlights.items()
+    )
+    display(HTML(f'<table class="table table-sm" style="width:auto">'
+                 f'<thead><tr><th>Strain</th><th>Label</th></tr></thead>'
+                 f'<tbody>{rows_hl}</tbody></table>'))
+else:
+    display(HTML("<em>None — pass <code>-P highlights_file:/path/to/highlights.yml</code> to mark strains.</em>"))
+```
+
+Bootstrap support on internal nodes:
+<span style="color:#2d6a4f; font-weight:bold">■ ≥95</span> &nbsp;
+<span style="color:#f4a261; font-weight:bold">■ ≥70</span> &nbsp;
+<span style="color:#aaaaaa">■ &lt;70 (not shown)</span>
+:::
+
+## 1. IQ-TREE ML phylogeny — no recombination masking
+
+```{python}
+#| echo: false
+if tt_no_gubbins is not None:
+    display(HTML(tt_no_gubbins_html))
+else:
+    display(HTML(f"<p><em>No IQ-TREE treefile found for min_freq={min_freq} (no_gubbins track).</em></p>"))
+```
+
+## 2. IQ-TREE ML phylogeny — Gubbins-masked
+
+```{python}
+#| echo: false
+if HAS_GUBBINS_TREE and tt_gubbins is not None:
+    display(HTML(tt_gubbins_html))
+elif HAS_GUBBINS_OUT and not HAS_GUBBINS_TREE:
+    display(HTML("""
+    <div class="callout callout-style-default callout-note callout-titled">
+    <div class="callout-header"><div class="callout-icon-container"><i class="callout-icon"></i></div>
+    <div class="callout-title-container flex-fill">No recombination detected</div></div>
+    <div class="callout-body-container callout-body">
+    <p>Gubbins was run but detected <strong>0 recombination blocks</strong>. No sites were
+    masked, so the no-masking tree above is the final tree.</p>
+    </div></div>
+    """))
+else:
+    display(HTML("""
+    <div class="callout callout-style-default callout-note callout-titled">
+    <div class="callout-header"><div class="callout-icon-container"><i class="callout-icon"></i></div>
+    <div class="callout-title-container flex-fill">Gubbins not run</div></div>
+    <div class="callout-body-container callout-body">
+    <p>Gubbins was not run for this dataset (<code>--skip_gubbins</code>).
+    Only the unmasked IQ-TREE is available.</p>
+    </div></div>
+    """))
+```
+
+## 3. Branch-length distribution
+
+```{python}
+#| echo: false
+if fig_bl is not None:
+    fig_bl.show()
+else:
+    display(HTML("<p><em>No tree loaded — branch-length plot unavailable.</em></p>"))
+```
+
+## 4. Pairwise ML distances
+
+Heatmap of IQ-TREE pairwise maximum-likelihood distances (`tree.mldist`), ordered by tree leaf order. Highlighted strain labels are **bold**.
+
+```{python}
+#| echo: false
+if fig_dist is not None:
+    fig_dist.show()
+else:
+    display(HTML("<p><em>No <code>tree.mldist</code> file found.</em></p>"))
+```
+
+## 5. Gubbins recombination statistics
+
+```{python}
+#| echo: false
+if gubbins_stats is not None and len(gubbins_stats) > 0 and n_recomb_blocks > 0:
+    fig_gubbins.show()
+elif gubbins_stats is not None:
+    display(HTML("""
+    <div class="callout callout-style-default callout-note callout-titled">
+    <div class="callout-header"><div class="callout-icon-container"><i class="callout-icon"></i></div>
+    <div class="callout-title-container flex-fill">No recombination detected</div></div>
+    <div class="callout-body-container callout-body">
+    <p>Gubbins completed but detected <strong>0 recombination blocks</strong>.
+    No SNPs were masked.</p>
+    </div></div>
+    """))
+    display(HTML(gubbins_stats.head(10).to_html(index=False, border=0,
+        classes='table table-sm table-striped', justify='left')))
+else:
+    display(HTML("<p><em>Gubbins was not run or outputs not found.</em></p>"))
+```
