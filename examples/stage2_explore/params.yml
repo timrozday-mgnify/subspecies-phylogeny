@@ -20,7 +20,7 @@ ska_merged_skf: "results/01_build/ska2/merged.skf"
 outdir: "results/02_explore"
 
 # Trial several thresholds; all branches run in parallel.
-ska_align_min_freq: "0.5,0.7,0.9,0.95,1.0"
+ska_align_min_freq: "0.5,0.6,0.7,0.8,0.9,0.95,1.0"
 
 # Uncomment and set to remove outlier samples before alignment.
 # The file should contain one sample name per line. Sample names are the FASTA
