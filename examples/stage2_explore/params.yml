@@ -6,8 +6,9 @@
 # skipped so this stage is fast.
 #
 # Outputs to check before proceeding:
-#   results/ska2/no_weed/min_freq_*/alignment.fasta  — compare lengths across thresholds
-#   results/snpsites/no_weed/min_freq_*/             — variable-site counts per threshold
+#   results/ska2/min_freq_*/alignment.fasta  — compare lengths across thresholds
+#   results/snpsites/min_freq_*/             — variable-site counts per threshold
+#   results/gubbins/min_freq_*/              — recombination predictions per threshold
 #
 # Choosing --ska_align_min_freq:
 #   Lower values (e.g. 0.5) keep positions present in only half the samples,

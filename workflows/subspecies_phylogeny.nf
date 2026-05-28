@@ -4,7 +4,6 @@ include { SKA2_ALIGN                  } from '../modules/local/ska2/align/main'
 include { SKA2_DELETE                 } from '../modules/local/ska2/delete/main'
 include { SKA2_DISTANCE               } from '../modules/local/ska2/distance/main'
 include { SKA2_LO                     } from '../modules/local/ska2/lo/main'
-include { SKA2_WEED                   } from '../modules/local/ska2/weed/main'
 include { NJ_TREE as NJ_TREE_FASTANI  } from '../modules/local/nj_tree/main'
 include { NJ_TREE as NJ_TREE_SKA2     } from '../modules/local/nj_tree/main'
 include { SNPSITES                    } from '../modules/nf-core/snpsites/main'
@@ -101,32 +100,23 @@ workflow SUBSPECIES_PHYLOGENY {
 
     if (!params.skip_alignment) {
         // -----------------------------------------------------------------------
-        // SKA2_WEED always runs alongside the raw branch, producing two parallel
-        // analysis tracks differentiated by 'no_weed' / 'weed' labels carried
-        // through the meta map to downstream publishDir closures.
+        // SKA2_ALIGN: fan out over every requested --min-freq value.
+        // params.ska_align_min_freq is a comma-separated string (e.g. "0.9" or
+        // "0.5,0.9,1.0"). Each value becomes one independent analysis branch.
         // -----------------------------------------------------------------------
-        SKA2_WEED(ch_merged_skf)
-        ch_versions = ch_versions.mix(SKA2_WEED.out.versions)
-
         ch_min_freq = Channel.fromList(
             params.ska_align_min_freq.tokenize(',').collect { it.trim() }
         )
 
-        // Fan out across weed states and min-freq values.
-        // meta.id encodes both so downstream joins are unambiguous.
         ch_align_input = ch_merged_skf
-            .map { skf -> ['no_weed', skf] }
-            .mix(SKA2_WEED.out.skf.map { skf -> ['weed', skf] })
             .combine(ch_min_freq)
-            .map { weed_label, skf, mf ->
-                [ [id: "${weed_label}_${mf}", weed: weed_label, min_freq: mf], skf ]
-            }
+            .map { skf, mf -> [ [id: mf, min_freq: mf], skf ] }
 
         SKA2_ALIGN(ch_align_input)
         ch_versions  = ch_versions.mix(SKA2_ALIGN.out.versions.first())
         ch_alignment = SKA2_ALIGN.out.alignment
 
-        // SNPSITES always runs on every alignment branch for its published output
+        // SNPSITES runs on every alignment branch for its published output
         // and to supply constant-sites counts for ascertainment-bias correction.
         SNPSITES(ch_alignment)
         ch_versions  = ch_versions.mix(SNPSITES.out.versions.first())
@@ -140,7 +130,7 @@ workflow SUBSPECIES_PHYLOGENY {
 
         if (!params.skip_iqtree) {
             // -----------------------------------------------------------------------
-            // IQ-TREE: two tracks per weed×min_freq combination.
+            // IQ-TREE: two tracks per min_freq combination.
             //   no_gubbins: snp-sites FASTA + ascertainment-bias correction (-fconst)
             //   gubbins:    Gubbins filtered_polymorphic_sites.fasta, no -fconst
             // meta.gubbins carries 'no_gubbins' / 'gubbins' into the publishDir closure.
@@ -178,10 +168,10 @@ workflow SUBSPECIES_PHYLOGENY {
     )
 
     emit:
-    alignment  = ch_alignment   // [ val(meta), path(*.fasta) ] — weed × min_freq combinations
-    snp_sites  = ch_snp_sites   // [ val(meta), path(*.fas) ]   — weed × min_freq combinations
-    gubbins    = ch_gubbins     // [ val(meta), path(*.filtered_polymorphic_sites.fasta) ] — weed × min_freq combinations
-    phylogeny  = ch_phylogeny   // [ val(meta), path(*.treefile) ] — weed × gubbins × min_freq combinations
+    alignment  = ch_alignment   // per min-freq: [ val(meta), path(*.fasta) ]
+    snp_sites  = ch_snp_sites   // per min-freq: [ val(meta), path(*.fas) ]
+    gubbins    = ch_gubbins     // per min-freq: [ val(meta), path(*.filtered_polymorphic_sites.fasta) ]
+    phylogeny  = ch_phylogeny   // per min-freq × gubbins track: [ val(meta), path(*.treefile) ]
     distances  = ch_distances   // path(distances.tsv)              — only when params.ska_distance
     lo_snps    = ch_lo_snps     // path(*_snps.fas)                 — only when params.ska_lo
     lo_indels  = ch_lo_indels   // path(*_indels.vcf)               — only when params.ska_lo

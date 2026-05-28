@@ -43,7 +43,7 @@ nextflow run main.nf -profile docker \
     -params-file examples/stage1_build/params.yml
 ```
 
-Stages 3 and 4 also take a `-c modules.config` to set tool-specific arguments:
+Stages 2, 3, and 4 also take a `-c modules.config` to set tool-specific arguments:
 
 ```bash
 nextflow run main.nf -profile docker \
@@ -83,18 +83,18 @@ nextflow run main.nf -profile docker \
     -c examples/stage2_explore/modules.config
 ```
 
-`--min-freq` controls what fraction of samples must have a called base at a position for it to be included in the alignment. Lower values retain more positions at the cost of more missing data; higher values give a cleaner but smaller alignment. Examine the alignment lengths in `ska2/no_weed/min_freq_*/alignment.fasta` alongside the Gubbins recombination maps in `gubbins/no_weed/min_freq_*/` to choose a value.
+`--min-freq` controls what fraction of samples must have a called base at a position for it to be included in the alignment. Lower values retain more positions at the cost of more missing data; higher values give a cleaner but smaller alignment. Examine the alignment lengths in `ska2/min_freq_*/alignment.fasta` alongside the Gubbins recombination maps in `gubbins/min_freq_*/` to choose a value.
 
 **Outputs to inspect:**
-- `ska2/no_weed/min_freq_*/alignment.fasta` — SNP alignment at each frequency threshold; compare lengths
-- `snpsites/no_weed/min_freq_*/` — variable-sites counts
-- `gubbins/no_weed/min_freq_*/` — Gubbins recombination predictions at each threshold
+- `ska2/min_freq_*/alignment.fasta` — SNP alignment at each frequency threshold; compare lengths
+- `snpsites/min_freq_*/` — variable-sites counts
+- `gubbins/min_freq_*/` — Gubbins recombination predictions at each threshold
 
-### Step 3 — Trial Gubbins and ska weed parameters
+### Step 3 — Trial Gubbins parameters
 
 **Example:** [`examples/stage3_trial/params.yml`](examples/stage3_trial/params.yml), [`examples/stage3_trial/modules.config`](examples/stage3_trial/modules.config)
 
-With a chosen min-freq value, run the full alignment block (with `--skip_iqtree`) to compare the four combinations of weed × Gubbins before committing to tree inference. Both the weeded and unweeded alignments are always produced, and Gubbins always runs on both. Adjust tool parameters in `modules.config` (see [Configuring tool arguments](#configuring-tool-arguments)).
+With a chosen min-freq value, run the full alignment block (with `--skip_iqtree`) to inspect the Gubbins outputs before committing to tree inference. Adjust Gubbins parameters in `modules.config` (see [Configuring tool arguments](#configuring-tool-arguments)).
 
 ```bash
 nextflow run main.nf -profile docker \
@@ -105,16 +105,14 @@ nextflow run main.nf -profile docker \
 Re-run this stage (updating `modules.config`) until satisfied with the recombination predictions and filtered alignments.
 
 **Outputs to inspect:**
-- `ska2/no_weed/min_freq_0.9/alignment.fasta` vs `ska2/weed/min_freq_0.9/alignment.fasta` — check alignment length difference between weed and no-weed
-- `gubbins/no_weed/min_freq_0.9/*.recombination_predictions.gff` — recombinant regions identified before weeding
-- `gubbins/weed/min_freq_0.9/*.recombination_predictions.gff` — recombinant regions after weeding
-- `gubbins/*/min_freq_0.9/*.filtered_polymorphic_sites.fasta` — recombination-free alignment that will feed IQ-TREE; check this is non-empty and has a reasonable number of variable sites
+- `gubbins/min_freq_0.9/*.recombination_predictions.gff` — predicted recombinant regions
+- `gubbins/min_freq_0.9/*.filtered_polymorphic_sites.fasta` — recombination-free alignment that will feed IQ-TREE; check this is non-empty and has a reasonable number of variable sites
 
 ### Step 4 — Run IQ-TREE to produce final phylogenies
 
 **Example:** [`examples/stage4_final/params.yml`](examples/stage4_final/params.yml), [`examples/stage4_final/modules.config`](examples/stage4_final/modules.config)
 
-Once satisfied with the alignment and Gubbins parameters, copy the finalised settings from stage 3 into `examples/stage4_final/modules.config`, add IQ-TREE model and bootstrap arguments, then run the full pipeline. All four combinations (weed × Gubbins) are inferred in parallel.
+Once satisfied with the alignment and Gubbins parameters, copy the finalised settings from stage 3 into `examples/stage4_final/modules.config`, add IQ-TREE model and bootstrap arguments, then run the full pipeline. Both the unmasked (`no_gubbins`) and Gubbins-masked (`gubbins`) trees are inferred in parallel.
 
 ```bash
 nextflow run main.nf -profile docker \
@@ -123,10 +121,8 @@ nextflow run main.nf -profile docker \
 ```
 
 **Outputs:**
-- `results/04_final/iqtree/no_weed/no_gubbins/min_freq_0.9/tree.treefile`
-- `results/04_final/iqtree/no_weed/gubbins/min_freq_0.9/tree.treefile`
-- `results/04_final/iqtree/weed/no_gubbins/min_freq_0.9/tree.treefile`
-- `results/04_final/iqtree/weed/gubbins/min_freq_0.9/tree.treefile`
+- `results/04_final/iqtree/no_gubbins/min_freq_0.9/tree.treefile`
+- `results/04_final/iqtree/gubbins/min_freq_0.9/tree.treefile`
 - `results/04_final/multiqc/multiqc_report.html`
 
 ---
@@ -160,26 +156,23 @@ results/
   ska2/
     skf/                          per-sample .skf files
     merged.skf                    merged split-kmer file (all samples)
-    merged_weeded.skf             merged SKF after ska weed
     merged_deleted.skf            merged SKF after ska delete (if --ska_delete_samples)
     distances.tsv                 pairwise SNP distances (if --ska_distance)
     lo_output_snps.fas            left-out SNPs (if --ska_lo)
     lo_output_indels.vcf          left-out INDELs (if --ska_lo)
-    no_weed/min_freq_<f>/
-      alignment.fasta             SNP alignment (all positions, unweeded)
-    weed/min_freq_<f>/
-      alignment.fasta             SNP alignment (weeded k-mers removed)
+    min_freq_<f>/
+      alignment.fasta             SNP alignment
   snpsites/
-    {no_weed,weed}/min_freq_<f>/
+    min_freq_<f>/
       <id>.fas                    variable-sites FASTA
       <id>.sites.txt              constant-sites counts for IQ-TREE correction
   gubbins/
-    {no_weed,weed}/min_freq_<f>/
+    min_freq_<f>/
       *.filtered_polymorphic_sites.fasta    recombination-free alignment
       *.recombination_predictions.gff       predicted recombinant regions
       *.summary_of_snp_distribution.vcf     SNP distribution summary
   iqtree/
-    {no_weed,weed}/{no_gubbins,gubbins}/min_freq_<f>/
+    {no_gubbins,gubbins}/min_freq_<f>/
       tree.treefile               ML phylogeny (Newick)
       tree.log                    IQ-TREE log
   fastani/
@@ -223,25 +216,6 @@ process {
 | `-k` | `31` | K-mer size. Set via `--ska_k`. Increase (e.g. 41, 51) to reduce spurious k-mer matches in more diverged genomes; decrease for very short reads or fragmented assemblies. Must be odd. |
 | `--single-strand` | off | Only use the forward strand. Use for single-stranded data or if palindromic k-mers cause issues. |
 | `--min-count` | `1` | Minimum count to include a k-mer (relevant for read input, not assemblies). |
-
-#### `ska weed`
-
-`ska weed` filters k-mer positions from the merged SKF before alignment. The pipeline always produces both weeded and unweeded outputs; this controls what the weeded branch removes.
-
-```groovy
-process {
-    withName: 'SKA2_WEED' {
-        ext.args = '--filter no-filter --min-freq 0.1'
-    }
-}
-```
-
-| Argument | Default | Notes |
-|---|---|---|
-| `--filter` | `core` | Position filter applied before weeding: `no-filter` keeps all positions; `core` retains only positions present in all samples; `bi-allelic` removes multi-allelic positions. |
-| `--min-freq` | `0.05` | Minimum minor-allele frequency. Positions below this threshold are removed. |
-| `--max-freq` | `0.95` | Maximum minor-allele frequency (removes near-fixed variants). |
-| `--ambig-mask` | off | Treat ambiguous bases (IUPAC codes) as missing data. |
 
 #### `ska align`
 
