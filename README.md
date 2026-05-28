@@ -182,6 +182,11 @@ results/
     ska2_distance_nj.nwk          NJ tree from ska distance (if --ska_distance)
   multiqc/
     multiqc_report.html
+  pipeline_info/
+    execution_trace_<datetime>.txt      per-task CPU/memory/time stats
+    execution_report_<datetime>.html    interactive run summary
+    execution_timeline_<datetime>.html  Gantt-style task timeline
+    pipeline_dag_<datetime>.html        workflow DAG
 ```
 
 ---
