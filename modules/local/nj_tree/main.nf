@@ -4,7 +4,7 @@ process NJ_TREE {
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
-        'https://community-cr-prod.seqera.io/docker/registry/v2/blobs/sha256/6a/6a4d76338a54d186afa4229a9d8be9d6110017b0c054e538609d18f567f7a537/data' :
+        'docker://community.wave.seqera.io/library/r-ape:5.8--48d6804841ebe369' :
         'community.wave.seqera.io/library/r-ape:5.8--48d6804841ebe369' }"
 
     input:
