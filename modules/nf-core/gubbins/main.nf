@@ -28,9 +28,6 @@ process GUBBINS {
     """
     export NUMBA_CACHE_DIR="\$PWD/.numba_cache"
 
-    # Gubbins only accepts ACGTNacgtn-; SKA2 may emit IUPAC ambiguity codes.
-    awk '/^>/{print; next} {gsub(/[^ACGTNacgtn-]/, "N"); print}' ${alignment} > gubbins_input.fasta
-
     # Cap threads at the number of cores visible to the container (e.g. Docker
     # Desktop may expose fewer cores than Nextflow's task.cpus allocation).
     threads=\$(( ${task.cpus} < \$(nproc) ? ${task.cpus} : \$(nproc) ))
@@ -39,7 +36,7 @@ process GUBBINS {
         --threads \$threads \\
         --prefix ${prefix} \\
         $args \\
-        gubbins_input.fasta
+        ${alignment}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

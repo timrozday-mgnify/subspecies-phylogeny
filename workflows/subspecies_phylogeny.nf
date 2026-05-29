@@ -4,6 +4,9 @@ include { SKA2_ALIGN                  } from '../modules/local/ska2/align/main'
 include { SKA2_DELETE                 } from '../modules/local/ska2/delete/main'
 include { SKA2_DISTANCE               } from '../modules/local/ska2/distance/main'
 include { SKA2_LO                     } from '../modules/local/ska2/lo/main'
+include { SKA2_WEED                   } from '../modules/local/ska2/weed/main'
+include { SKA2_MAP                    } from '../modules/local/ska2/map/main'
+include { SELECT_REFERENCE            } from '../modules/local/select_reference/main'
 include { NJ_TREE as NJ_TREE_FASTANI  } from '../modules/local/nj_tree/main'
 include { NJ_TREE as NJ_TREE_SKA2     } from '../modules/local/nj_tree/main'
 include { SNPSITES                    } from '../modules/nf-core/snpsites/main'
@@ -23,7 +26,8 @@ workflow SUBSPECIES_PHYLOGENY {
     // Upstream: either run the full BUILD → MERGE chain or skip straight to
     // alignment using a pre-computed merged SKF file.
     // -----------------------------------------------------------------------
-    ch_nj_fastani = Channel.empty()
+    ch_nj_fastani  = Channel.empty()
+    ch_map_reference = Channel.empty()
 
     if (params.ska_merged_skf) {
         ch_merged_skf = Channel.fromPath(params.ska_merged_skf, checkIfExists: true)
@@ -39,10 +43,25 @@ workflow SUBSPECIES_PHYLOGENY {
         ch_versions   = ch_versions.mix(NJ_TREE_FASTANI.out.versions)
         ch_nj_fastani = NJ_TREE_FASTANI.out.tree
 
+        // Select the FastANI medoid as the ska map reference (unless overridden below).
+        SELECT_REFERENCE(
+            FASTANI_ALLVSALL.out.ani,
+            ch_input.map { meta, fasta -> fasta }.collect()
+        )
+        ch_versions      = ch_versions.mix(SELECT_REFERENCE.out.versions)
+        ch_map_reference = SELECT_REFERENCE.out.reference
+
         SKA2_PHYLOGENY(ch_input)
         ch_versions   = ch_versions.mix(SKA2_PHYLOGENY.out.versions)
         ch_merged_skf = SKA2_PHYLOGENY.out.merged_skf
     }
+
+    // User-supplied reference takes priority over the auto-selected medoid.
+    // In --ska_merged_skf mode without --ska_map_reference the channel stays
+    // empty and the Gubbins track is skipped with a warning.
+    ch_ska_map_ref = params.ska_map_reference
+        ? Channel.fromPath(params.ska_map_reference, checkIfExists: true)
+        : ch_map_reference
 
     // -----------------------------------------------------------------------
     // Optional SKA2_DELETE: remove specified samples from the merged SKF.
@@ -124,7 +143,26 @@ workflow SUBSPECIES_PHYLOGENY {
 
         ch_gubbins = Channel.empty()
         if (!params.skip_gubbins) {
-            GUBBINS(ch_alignment)
+            // Weed each min_freq branch of the merged SKF (same frequency threshold
+            // as ska align) then map against the selected reference genome.
+            ch_weed_input = ch_merged_skf
+                .combine(ch_min_freq)
+                .map { skf, mf -> [ [id: mf, min_freq: mf], skf ] }
+
+            SKA2_WEED(ch_weed_input)
+            ch_versions = ch_versions.mix(SKA2_WEED.out.versions.first())
+
+            // Pair each weeded SKF with the reference. When ch_ska_map_ref is
+            // empty (ska_merged_skf mode without --ska_map_reference), the
+            // combine produces no items and SKA2_MAP / GUBBINS simply never run.
+            ch_map_input = SKA2_WEED.out.skf
+                .combine(ch_ska_map_ref)
+                .map { meta, skf, ref -> [ meta, ref, skf ] }
+
+            SKA2_MAP(ch_map_input)
+            ch_versions = ch_versions.mix(SKA2_MAP.out.versions.first())
+
+            GUBBINS(SKA2_MAP.out.alignment)
             ch_versions = ch_versions.mix(GUBBINS.out.versions.first())
             ch_gubbins  = GUBBINS.out.fasta
         }
