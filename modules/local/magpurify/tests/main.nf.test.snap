@@ -1,0 +1,30 @@
+{
+    "Bacteroides uniformis genome [fasta] \u2014 gc-content + tetra-freq (no database)": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,baf261413777c0159a41578d13cc9cdb"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-01T15:29:16.501305",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "Bacteroides uniformis genome [fasta] - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,e701c5b11c469b78fd84ae52a2d6fd71"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-01T15:29:19.898041",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

@@ -7,8 +7,9 @@ nextflow_pipeline {
     test("three B. uniformis genomes") {
         when {
             params {
-                input  = "${projectDir}/tests/samplesheets/test.csv"
-                outdir = "$outputDir"
+                input    = "${projectDir}/tests/samplesheets/test.csv"
+                outdir   = "$outputDir"
+                skip_qc  = true
             }
         }
         then {
@@ -58,8 +59,9 @@ nextflow_pipeline {
         options "-stub"
         when {
             params {
-                input  = "${projectDir}/tests/samplesheets/test.csv"
-                outdir = "$outputDir"
+                input   = "${projectDir}/tests/samplesheets/test.csv"
+                outdir  = "$outputDir"
+                skip_qc = true
             }
         }
         then {
@@ -81,6 +83,7 @@ nextflow_pipeline {
                 input               = "${projectDir}/tests/samplesheets/test.csv"
                 outdir              = "$outputDir"
                 ska_delete_samples  = "${projectDir}/tests/data/delete_samples.txt"
+                skip_qc             = true
             }
         }
         then {
@@ -99,6 +102,7 @@ nextflow_pipeline {
                 input         = "${projectDir}/tests/samplesheets/test.csv"
                 outdir        = "$outputDir"
                 ska_distance  = true
+                skip_qc       = true
             }
         }
         then {
@@ -117,6 +121,7 @@ nextflow_pipeline {
                 input    = "${projectDir}/tests/samplesheets/test.csv"
                 outdir   = "$outputDir"
                 ska_lo   = true
+                skip_qc  = true
             }
         }
         then {
@@ -162,6 +167,7 @@ nextflow_pipeline {
                 ska_merged_skf = "${projectDir}/tests/data/dummy_merged.skf"
                 input          = "${projectDir}/tests/samplesheets/test.csv"
                 outdir         = "$outputDir"
+                skip_qc        = true
             }
         }
         then {
@@ -182,6 +188,7 @@ nextflow_pipeline {
                 input          = "${projectDir}/tests/samplesheets/test.csv"
                 outdir         = "$outputDir"
                 skip_alignment = true
+                skip_qc        = true
             }
         }
         then {
@@ -202,6 +209,7 @@ nextflow_pipeline {
                 input       = "${projectDir}/tests/samplesheets/test.csv"
                 outdir      = "$outputDir"
                 skip_iqtree = true
+                skip_qc     = true
             }
         }
         then {
@@ -223,6 +231,7 @@ nextflow_pipeline {
                 input              = "${projectDir}/tests/samplesheets/test.csv"
                 outdir             = "$outputDir"
                 ska_align_min_freq = "0.5,0.9"
+                skip_qc            = true
             }
         }
         then {
@@ -234,6 +243,48 @@ nextflow_pipeline {
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
                 // = 7 + 10 + 4 + 2 = 23 tasks
                 { assert workflow.trace.succeeded().size() == 23 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub with qc (no databases)") {
+        options "-stub"
+        when {
+            params {
+                input   = "${projectDir}/tests/samplesheets/test.csv"
+                outdir  = "$outputDir"
+                skip_qc = false
+                // No db params set — only QUAST + MAGPURIFY run (database-free)
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // default (16 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY = 22 tasks
+                { assert workflow.trace.succeeded().size() == 22 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub with qc (all databases)") {
+        options "-stub"
+        when {
+            params {
+                input            = "${projectDir}/tests/samplesheets/test.csv"
+                outdir           = "$outputDir"
+                skip_qc          = false
+                // CheckM2 and CheckM are stub-only (databases require checksums / pplacer)
+                gunc_db          = "${projectDir}/tests/databases/mini_gunc.dmnd"
+                busco_lineage_db = "${projectDir}/tests/databases/busco_downloads"
+                busco_lineage    = "mini_test_odb10"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // default (16) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 28 tasks
+                // (CheckM2 and CheckM require real databases with checksums/pplacer)
+                { assert workflow.trace.succeeded().size() == 28 }
             )
         }
     }

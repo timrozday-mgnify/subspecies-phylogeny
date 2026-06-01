@@ -1,0 +1,53 @@
+nextflow_process {
+    name "Test Process QUAST"
+    script "../main.nf"
+    process "QUAST"
+
+    tag "modules"
+    tag "quast"
+    tag "nf-core/quast"
+
+    test("Bacteroides uniformis genome [fasta]") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'BU_61' ],
+                    [ file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true) ]
+                ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.results.size() == 1 },
+                { assert process.out.tsv.size() == 1 },
+                { assert new File(process.out.results.get(0).get(1).toString()).isDirectory() },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ [ id: 'BU_61' ], [ file('stub.fa') ] ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.results.size() == 1 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

@@ -1,0 +1,66 @@
+nextflow_process {
+    name "Test Process MAGPURIFY"
+    script "../main.nf"
+    process "MAGPURIFY"
+
+    tag "modules"
+    tag "magpurify"
+    tag "local/magpurify"
+
+    test("Bacteroides uniformis genome [fasta] — gc-content + tetra-freq (no database)") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'BU_61' ],
+                    file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                ]
+                input[1] = []
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.results.size() == 1 },
+                { assert new File(process.out.results.get(0).get(1).toString()).isDirectory() },
+                { assert process.out.gc_contaminants.size() == 1 },
+                { assert path(process.out.gc_contaminants.get(0).get(1)).exists() },
+                { assert process.out.tetra_contaminants.size() == 1 },
+                { assert path(process.out.tetra_contaminants.get(0).get(1)).exists() },
+                // No phylo-markers without a database
+                { assert process.out.phylo_contaminants.size() == 0 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'BU_61' ],
+                    file('stub.fa')
+                ]
+                input[1] = []
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.results.size() == 1 },
+                { assert new File(process.out.results.get(0).get(1).toString()).isDirectory() },
+                { assert process.out.gc_contaminants.size() == 1 },
+                { assert process.out.tetra_contaminants.size() == 1 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

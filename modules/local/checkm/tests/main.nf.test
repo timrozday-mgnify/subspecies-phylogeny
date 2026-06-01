@@ -1,0 +1,39 @@
+nextflow_process {
+    name "Test Process CHECKM"
+    script "../main.nf"
+    process "CHECKM"
+
+    tag "modules"
+    tag "checkm"
+    tag "local/checkm"
+
+    // Note: CheckM v1 lineage_wf requires pplacer for phylogenetic placement against a
+    // ~2,000-genome reference tree, making it impractical to miniaturise for CI testing.
+    // Real tests require the official CheckM database (~1.4 GB, see README).
+    // Only the stub test is run here.
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'BU_61' ],
+                    file('stub.fa')
+                ]
+                input[1] = file('stub_db')
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.checkm_tsv.size() == 1 },
+                { assert path(process.out.checkm_tsv.get(0).get(1)).exists() },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

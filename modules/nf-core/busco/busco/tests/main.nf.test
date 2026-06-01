@@ -1,0 +1,56 @@
+nextflow_process {
+    name "Test Process BUSCO_BUSCO"
+    script "../main.nf"
+    process "BUSCO_BUSCO"
+
+    tag "modules"
+    tag "busco"
+    tag "nf-core/busco/busco"
+
+    test("Bacteroides uniformis genome [fasta] — mini lineage database") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'BU_61' ],
+                    file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                ]
+                input[1] = 'mini_test_odb10'
+                input[2] = file(params.test_db_base + 'busco_downloads', checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.batch_summary.size() == 1 },
+                { assert path(process.out.batch_summary.get(0).get(1)).exists() },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ [ id: 'BU_61' ], file('stub.fa') ]
+                input[1] = 'bacteria_odb10'
+                input[2] = []
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.batch_summary.size() == 1 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

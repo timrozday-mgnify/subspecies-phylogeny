@@ -1,0 +1,12 @@
+NAME  REC
+ACC   PF00072.26
+DESC  Response regulator receiver domain
+LENG  112
+ML_CUT -1.00
+//
+NAME  HATPase_c
+ACC   PF02518.30
+DESC  Histidine kinase-, DNA gyrase B-, and HSP90-like ATPase
+LENG  112
+ML_CUT -1.00
+//

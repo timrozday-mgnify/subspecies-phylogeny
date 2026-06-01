@@ -1,0 +1,30 @@
+{
+    "Bacteroides uniformis genome [fasta]": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,51393275b26f4f0f3c7c107a0b9756f9"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-01T14:50:09.850972",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "Bacteroides uniformis genome [fasta] - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,51393275b26f4f0f3c7c107a0b9756f9"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-01T14:50:13.47321",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

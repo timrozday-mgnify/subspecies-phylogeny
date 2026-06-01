@@ -1079,13 +1079,33 @@ _diag_order = (
 )
 
 # 4.3 / 4.4 — Pairwise SKA2 SNP distances (optional; requires --ska_distance true)
+# ska distance writes long format: Sample1 | Sample2 | Distance | ...
+# Pivot to a square matrix, then symmetrise (only one triangle is typically written).
 _ska_dist_path = explore_dir / "ska2" / "distances.tsv"
 snp_dist_df = None
 if _ska_dist_path.exists():
     try:
-        snp_dist_df = pd.read_csv(_ska_dist_path, sep='\t', index_col=0)
+        _raw = pd.read_csv(_ska_dist_path, sep='\t')
+        # Detect whether the file is already a square matrix (index_col=0 gives numeric
+        # columns) or long-format (columns contain 'Sample1'/'Sample2'/'Distance').
+        if {'Sample1', 'Sample2', 'Distance'}.issubset(_raw.columns):
+            snp_dist_df = _raw.pivot_table(
+                index='Sample1', columns='Sample2',
+                values='Distance', aggfunc='first'
+            )
+            snp_dist_df.index.name = None
+            snp_dist_df.columns.name = None
+        else:
+            # Already square — re-read with first column as index
+            snp_dist_df = _raw.set_index(_raw.columns[0])
+            snp_dist_df.index.name = None
+        # Symmetrise upper/lower triangles and set diagonal to 0
         snp_dist_df = snp_dist_df.combine_first(snp_dist_df.T)
-    except Exception:
+        for _s in snp_dist_df.index:
+            if _s in snp_dist_df.columns:
+                snp_dist_df.loc[_s, _s] = 0.0
+    except Exception as _e:
+        warnings.warn(f"Could not parse {_ska_dist_path}: {_e}")
         snp_dist_df = None
 
 # 4.5 — Robinson–Foulds distance helpers

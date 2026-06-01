@@ -1,0 +1,54 @@
+nextflow_process {
+    name "Test Process GUNC_RUN"
+    script "../main.nf"
+    process "GUNC_RUN"
+
+    tag "modules"
+    tag "gunc"
+    tag "nf-core/gunc/run"
+
+    test("Bacteroides uniformis genome [fasta] — mini database") {
+        when {
+            process {
+                """
+                input[0] = [
+                    [ id: 'BU_61' ],
+                    [ file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true) ]
+                ]
+                input[1] = file(params.test_db_base + 'mini_gunc.dmnd', checkIfExists: true)
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.maxcss_level_tsv.size() == 1 },
+                { assert path(process.out.maxcss_level_tsv.get(0).get(1)).exists() },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ [ id: 'BU_61' ], [ file('stub.fa') ] ]
+                input[1] = file('stub.dmnd')
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.maxcss_level_tsv.size() == 1 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

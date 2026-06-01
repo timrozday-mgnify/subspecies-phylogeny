@@ -10,6 +10,12 @@ Input genomes are expected to be closely related — same species or subspecies.
 
 - [Quick start](#quick-start)
 - [Intended workflow](#intended-workflow)
+  - [Stage 0 — Genome QC](#step-0--genome-quality-control)
+  - [Stage 1 — Build merged SKF](#step-1--build-the-merged-skf)
+  - [Stage 2 — Explore min-freq](#step-2--explore-min-freq-values-and-remove-outliers)
+  - [Stage 3 — Trial Gubbins](#step-3--trial-gubbins-parameters)
+  - [Stage 4 — Final phylogeny](#step-4--run-iq-tree-to-produce-final-phylogenies)
+- [Genome QC](#genome-qc)
 - [Pipeline parameters](#pipeline-parameters)
 - [Output structure](#output-structure)
 - [Configuring tool arguments](#configuring-tool-arguments)
@@ -17,6 +23,7 @@ Input genomes are expected to be closely related — same species or subspecies.
   - [Gubbins](#gubbins-arguments)
   - [IQ-TREE](#iq-tree-arguments)
 - [Samplesheet format](#samplesheet-format)
+- [Reference databases](#reference-databases)
 - [Requirements](#requirements)
 
 ---
@@ -50,6 +57,59 @@ nextflow run main.nf -profile docker \
     -params-file examples/stage3_trial/params.yml \
     -c examples/stage3_trial/modules.config
 ```
+
+---
+
+### Step 0 — Genome quality control
+
+**Example:** [`examples/stage0_qc/params.yml`](examples/stage0_qc/params.yml), [`examples/stage0_qc/modules.config`](examples/stage0_qc/modules.config)
+
+Run genome QC before committing to phylogenetic analysis. This step assesses
+completeness, contamination, and chimeric content for each input genome. It also
+builds the merged SKF and runs FastANI, so the outputs serve double duty: QC
+reports for reviewing genome quality, plus the `merged.skf` reused in stage 1.
+
+```bash
+nextflow run main.nf -profile docker \
+    -params-file examples/stage0_qc/params.yml \
+    -c examples/stage0_qc/modules.config
+```
+
+Activate database-dependent tools by uncommenting and setting their paths in
+`params.yml` (see [Reference databases](#reference-databases)):
+
+| Tool | Activated by |
+|---|---|
+| QUAST, MAGpurify | Always active |
+| CheckM2 | `checkm2_db` |
+| CheckM v1 | `checkm_db` |
+| GUNC | `gunc_db` |
+| BUSCO | `busco_lineage_db` + `busco_lineage` |
+
+**Outputs to review** (`results/00_qc/`):
+- `qc/quast/<sample>/` — N50, contig count, GC%
+- `qc/magpurify/<sample>/` — GC-content and tetranucleotide-frequency outlier contigs
+- `qc/checkm2/<sample>/` — completeness and contamination (ML-based)
+- `qc/checkm/<sample>/` — completeness and contamination (HMM-based, legacy)
+- `qc/gunc/<sample>/` — chimeric genome detection score
+- `qc/busco/<sample>/` — lineage-specific ortholog completeness
+- `fastani/fastani.txt` — pairwise ANI (flag samples < 95 % ANI to cohort)
+- `nj_tree/fastani_nj.nwk` — quick NJ tree (check for outlier branches)
+- `ska2/merged.skf` — pre-computed merged SKF for stage 1
+
+**Decision guidance:**
+
+- CheckM2 completeness < 90 % or contamination > 5 % → consider removing the genome
+- GUNC maxCSS > 0.45 → genome may be chimeric; inspect further
+- FastANI ANI < 95 % to cohort median → may be the wrong species
+- MAGpurify flagged contigs → review and optionally clean the FASTA
+
+To remove problem genomes: add their FASTA basenames (without extension) to a
+plain-text file and pass it to `--ska_delete_samples` in stage 2.
+
+::: {.callout-note}
+A Quarto report for stage 0 QC results will be added once example outputs are available.
+:::
 
 ---
 
@@ -127,6 +187,32 @@ nextflow run main.nf -profile docker \
 
 ---
 
+## Genome QC
+
+Before any phylogenetic analysis the pipeline runs a genome quality-control section that
+assesses completeness, contamination, and chimeric content. Results are **informational
+only** — no genomes are filtered from the downstream analysis. Skip the entire section with
+`--skip_qc`.
+
+| Tool | Purpose | Needs database? |
+|---|---|---|
+| [QUAST](https://quast.sourceforge.net/) | Assembly statistics (N50, contig count, GC%) | No |
+| [MAGpurify](https://github.com/snayfach/MAGpurify) | Per-contig chimera detection (GC-content + tetranucleotide frequency) | No (optional for `phylo-markers` module) |
+| [CheckM2](https://github.com/chklovski/CheckM2) | ML-based completeness and contamination | Yes — `--checkm2_db` |
+| [CheckM](https://github.com/Ecogenomics/CheckM) v1 | HMM-based completeness and contamination (legacy) | Yes — `--checkm_db` |
+| [GUNC](https://grp-bork.embl-community.io/gunc/) | Chimeric genome detection via gene taxonomy | Yes — `--gunc_db` |
+| [BUSCO](https://busco.ezlab.org/) | Lineage-specific single-copy ortholog completeness | Yes — `--busco_lineage_db` |
+
+QUAST and MAGpurify (gc-content + tetra-freq modules) run on every genome whenever
+`--skip_qc` is not set, regardless of database availability. The remaining tools only run
+when their database path is supplied. See [Reference databases](#reference-databases) for
+download instructions and [Step 0](#step-0--genome-quality-control) for the recommended
+stage-0 workflow.
+
+Outputs are published under `results/qc/<toolname>/<sample>/`.
+
+---
+
 ## Pipeline parameters
 
 | Parameter | Default | Description |
@@ -143,6 +229,13 @@ nextflow run main.nf -profile docker \
 | `--ska_distance` | `false` | Run `ska distance` to produce a pairwise SNP distance table and NJ tree |
 | `--ska_lo` | `false` | Run `ska lo` to identify SNPs and INDELs left out of the split-kmer graph (proxy for ambiguous regions) |
 | `--ska_lo_reference` | `null` | Optional reference FASTA to anchor `ska lo` coordinates |
+| `--skip_qc` | `false` | Skip the entire genome QC section (QUAST, MAGpurify, CheckM2, CheckM, GUNC, BUSCO) |
+| `--checkm2_db` | `null` | Path to CheckM2 DIAMOND database file (`.dmnd`). CheckM2 only runs when this is set |
+| `--checkm_db` | `null` | Path to CheckM v1 database root directory. CheckM only runs when this is set |
+| `--gunc_db` | `null` | Path to GUNC DIAMOND database file (`.dmnd`). GUNC only runs when this is set |
+| `--busco_lineage_db` | `null` | Path to directory of pre-downloaded BUSCO lineage datasets. BUSCO only runs when this is set |
+| `--busco_lineage` | `null` | BUSCO lineage name (e.g. `bacteria_odb10`). Defaults to `auto_prok` when not set |
+| `--magpurify_db` | `null` | Path to MAGpurify database directory for the `phylo-markers` module (optional) |
 | `--multiqc_title` | `null` | Custom title for the MultiQC report |
 | `--max_cpus` | `16` | Maximum CPUs available per process |
 | `--max_memory` | `128.GB` | Maximum memory available per process |
@@ -153,7 +246,29 @@ nextflow run main.nf -profile docker \
 ## Output structure
 
 ```
-results/
+results/                              (example layout using stage0_qc → stage4_final)
+  00_qc/                             stage 0 outputs
+    qc/  fastani/  nj_tree/  ska2/   see detail below
+  01_build/  02_explore/  ...        stages 1–4 (see below)
+
+results/                              (per-stage QC detail)
+  qc/
+    quast/<sample>/
+      report.html                     QUAST assembly report
+      report.tsv.gz                   TSV version of the report
+    magpurify/<sample>/
+      *_gc_contaminants.txt           contigs flagged by GC-content check
+      *_tetra_contaminants.txt        contigs flagged by tetranucleotide-frequency check
+      *_phylo_contaminants.txt        contigs flagged by phylo-markers (if --magpurify_db)
+    checkm2/<sample>/
+      *_checkm2_report.tsv            completeness and contamination estimates
+    checkm/<sample>/
+      *_checkm_qa.tsv                 CheckM v1 lineage-workflow QA table
+    gunc/<sample>/
+      *.maxCSS_level.tsv              GUNC contamination assessment (max CSS level)
+    busco/<sample>/
+      *.batch_summary.txt             BUSCO batch summary
+      short_summary.*.txt             per-lineage short summary
   ska2/
     skf/                          per-sample .skf files
     merged.skf                    merged split-kmer file (all samples)
@@ -194,7 +309,7 @@ results/
 
 ## Configuring tool arguments
 
-Tool-specific arguments are injected via `ext.args` in a Nextflow config file. Create a `custom.config` alongside your run command:
+Tool-specific arguments are injected via `ext.args` in a Nextflow config file. The stage 0 example config at [`examples/stage0_qc/modules.config`](examples/stage0_qc/modules.config) contains commented-out overrides for each QC tool. Create a `custom.config` for any stage:
 
 ```bash
 nextflow run main.nf -profile docker -c custom.config --input samplesheet.csv --outdir results
@@ -388,6 +503,76 @@ Rendered HTML files are self-contained (`embed-resources: true`) and can be shar
 
 ---
 
+## Reference databases
+
+The genome QC tools that require databases are not downloaded automatically. Download them
+once to a stable location on your system and point the pipeline to them via the parameters
+below.
+
+### CheckM2
+
+```bash
+# Using the CheckM2 CLI (recommended — verifies the download)
+checkm2 database --download --path /path/to/checkm2_db/
+
+# Or download directly from Zenodo (~3.5 GB):
+# https://zenodo.org/records/5571251/files/checkm2_database.tar.gz
+```
+
+Pass to the pipeline: `--checkm2_db /path/to/checkm2_db/CheckM2_database/uniref100.KO.1.dmnd`
+
+### CheckM v1
+
+```bash
+# Download the database archive (~1.4 GB):
+# https://data.ace.uq.edu.au/public/CheckM_databases/checkm_data_2015_01_16.tar.gz
+
+mkdir /path/to/checkm_db && tar xzf checkm_data_2015_01_16.tar.gz -C /path/to/checkm_db
+```
+
+Pass to the pipeline: `--checkm_db /path/to/checkm_db`
+
+### GUNC
+
+```bash
+# Using the GUNC CLI (progenomes2 database, ~3.5 GB)
+gunc download_db /path/to/gunc_db/ --db progenomes2
+
+# GTDB database (~11 GB, higher resolution)
+gunc download_db /path/to/gunc_db/ --db gtdb
+```
+
+Pass to the pipeline: `--gunc_db /path/to/gunc_db/gunc_db_progenomes2.0.dmnd`
+
+Reference: https://grp-bork.embl-community.io/gunc/install.html
+
+### BUSCO
+
+```bash
+# Download a specific lineage (recommended for prokaryotes)
+busco --download bacteria_odb10 --download_path /path/to/busco_lineages/
+
+# Browse available lineages:
+# https://busco-data.ezlab.org/v5/data/lineages/
+```
+
+Pass to the pipeline:
+- `--busco_lineage_db /path/to/busco_lineages/`
+- `--busco_lineage bacteria_odb10` (or another lineage name, or leave unset to use `auto_prok`)
+
+### MAGpurify (phylo-markers module, optional)
+
+```bash
+# Using the MAGpurify CLI (~2 GB)
+magpurify download_db /path/to/magpurify_db/
+```
+
+Pass to the pipeline: `--magpurify_db /path/to/magpurify_db/`
+
+The MAGpurify GC-content and tetranucleotide-frequency modules run without any database.
+
+---
+
 ## Requirements
 
 - [Nextflow](https://nextflow.io/) ≥ 25.0
@@ -404,3 +589,9 @@ No other software needs to be installed; all tools are pulled from container ima
 | IQ-TREE | — | nf-core/iqtree |
 | R (ape) | ≥ 5.8 | `community.wave.seqera.io/library/r-ape:5.8--48d6804841ebe369` |
 | MultiQC | — | nf-core/multiqc |
+| QUAST | 5.2.0 | `quay.io/biocontainers/quast:5.2.0--py39pl5321heaaa4ec_4` |
+| MAGpurify | 2.1.2 | `quay.io/biocontainers/magpurify:2.1.2--pyhdfd78af_2` |
+| CheckM2 | 1.0.1 | `quay.io/biocontainers/checkm2:1.0.1--pyh7cba7a3_0` |
+| CheckM v1 | 1.2.3 | `quay.io/biocontainers/checkm-genome:1.2.3--pyhdfd78af_1` |
+| GUNC | 1.0.6 | `quay.io/biocontainers/gunc:1.0.6--pyhdfd78af_0` |
+| BUSCO | 5.4.7 | `quay.io/biocontainers/busco:5.4.7--pyhdfd78af_0` |

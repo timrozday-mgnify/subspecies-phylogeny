@@ -1,0 +1,34 @@
+nextflow_process {
+    name "Test Process CHECKM2_PREDICT"
+    script "../main.nf"
+    process "CHECKM2_PREDICT"
+
+    tag "modules"
+    tag "checkm2"
+    tag "nf-core/checkm2/predict"
+
+    // Note: CheckM2 validates its database via an internal checksum and will reject
+    // any synthetic mini database. Real tests require the official CheckM2 database
+    // (~3.5 GB, see README "Reference databases" section). Only the stub test is run here.
+
+    test("Bacteroides uniformis genome [fasta] - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ [ id: 'BU_61' ], [ file('stub.fa') ] ]
+                input[1] = [ [ id: 'checkm2_db' ], file('stub.dmnd') ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.checkm2_tsv.size() == 1 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

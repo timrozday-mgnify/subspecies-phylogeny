@@ -1,3 +1,4 @@
+include { GENOME_QC                   } from '../subworkflows/local/genome_qc/main'
 include { FASTANI_ALLVSALL            } from '../modules/local/fastani_allvsall/main'
 include { SKA2_PHYLOGENY              } from '../subworkflows/local/ska2_phylogeny/main'
 include { SKA2_ALIGN                  } from '../modules/local/ska2/align/main'
@@ -21,6 +22,18 @@ workflow SUBSPECIES_PHYLOGENY {
 
     main:
     ch_versions = Channel.empty()
+
+    // -----------------------------------------------------------------------
+    // Genome QC — runs before any phylogenetic analysis.
+    // Results are informational only; ch_input is not filtered.
+    // Individual database-dependent tools (CheckM2, CheckM, GUNC, BUSCO) only
+    // run when their respective database path parameter is non-null.
+    // Disable with --skip_qc.
+    // -----------------------------------------------------------------------
+    if (!params.skip_qc) {
+        GENOME_QC(ch_input)
+        ch_versions = ch_versions.mix(GENOME_QC.out.versions)
+    }
 
     // -----------------------------------------------------------------------
     // Upstream: either run the full BUILD → MERGE chain or skip straight to
