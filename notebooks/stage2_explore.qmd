@@ -262,6 +262,76 @@ for mf_dir in sorted(explore_dir.glob("gubbins/min_freq_*"),
     gubbins_data[mf] = {'stats': stats, 'n_recomb_blocks': n_recomb_blocks}
 
 available_gubbins_mf = sorted(gubbins_data.keys())
+
+# --- Reference genome (SELECT_REFERENCE medoid) ----------------------
+# Try the published reference.fa; fall back to the highest-mean-ANI sample.
+ref_name = None
+_ref_fa = build_dir / "ska2" / "map" / "reference.fa"
+if _ref_fa.exists():
+    with open(_ref_fa) as _fh:
+        _hdr = _fh.readline().strip().lstrip('>')
+    ref_name = re.sub(r'\.fa(sta)?$', '', _hdr.split()[0])
+else:
+    _diag = ani_matrix.copy().astype(float)
+    np.fill_diagonal(_diag.values, np.nan)
+    if not _diag.empty:
+        ref_name = _diag.mean(axis=1).idxmax()
+
+# --- Detailed GFF parsing (recombination block coordinates) ----------
+gubbins_gff = {}   # mf -> DataFrame[sample, start, end, length, snp_count, node]
+_genome_len  = 0   # largest sequence-region seen across all GFFs
+
+for _mf, _d in gubbins_data.items():
+    _mf_dir   = explore_dir / f"gubbins/min_freq_{_mf}"
+    _gff_list = list(_mf_dir.glob("*.recombination_predictions.gff"))
+    if not _gff_list:
+        gubbins_gff[_mf] = pd.DataFrame(
+            columns=['sample', 'start', 'end', 'length', 'snp_count', 'node'])
+        continue
+    _rows   = []
+    _seq_len = None
+    with open(_gff_list[0]) as _fh:
+        for _line in _fh:
+            _line = _line.rstrip()
+            if _line.startswith('##sequence-region'):
+                _p = _line.split()
+                if len(_p) >= 4:
+                    _seq_len = int(_p[3])
+                continue
+            if _line.startswith('#') or not _line:
+                continue
+            _parts = _line.split('\t')
+            if len(_parts) < 9:
+                continue
+            _start = int(_parts[3])
+            _end   = int(_parts[4])
+            _attrs = {}
+            for _item in _parts[8].rstrip(';').split(';'):
+                _item = _item.strip()
+                if '=' in _item:
+                    _k, _v = _item.split('=', 1)
+                    _attrs[_k.strip()] = _v.strip().strip('"')
+            _snp = int(_attrs.get('snp_count', 0))
+            _node = _attrs.get('node', '')
+            for _taxon in _attrs.get('taxa', '').split():
+                _rows.append({
+                    'sample':    _taxon,
+                    'start':     _start,
+                    'end':       _end,
+                    'length':    _end - _start + 1,
+                    'snp_count': _snp,
+                    'node':      _node,
+                })
+    _df = (pd.DataFrame(_rows) if _rows
+           else pd.DataFrame(columns=['sample', 'start', 'end', 'length', 'snp_count', 'node']))
+    if _seq_len is not None:
+        _df.attrs['seq_len'] = _seq_len
+        _genome_len = max(_genome_len, _seq_len)
+    elif not _df.empty:
+        _genome_len = max(_genome_len, int(_df['end'].max()))
+    gubbins_gff[_mf] = _df
+
+_genome_len = _genome_len or 4_400_000
 ```
 
 ```{python}
@@ -312,6 +382,7 @@ def draw_toytree(tt, title=None, tip_font_size='10px', width=900):
 #| echo: false
 from IPython.display import display, Markdown
 
+_ref_display = f"`{ref_name}`" if ref_name else "_not found_"
 display(Markdown(f"""
 | Parameter | Value |
 |-----------|-------|
@@ -319,6 +390,7 @@ display(Markdown(f"""
 | Build results | `{build_dir.resolve()}` |
 | Explore results | `{explore_dir.resolve()}` |
 | Samples | {n_samples} |
+| **ska map reference (medoid)** | **{_ref_display}** |
 | Min-freq values tested | {sorted(stats_df['min_freq'].tolist())} |
 | Alignment files found | {len(align_rows)} |
 | SNP-sites files found | {len(snp_rows)} |
@@ -362,13 +434,37 @@ heatmap below help identify potential outliers before proceeding to alignment.
 
 ### 1.1 Neighbour-joining tree
 
+The genome selected as the `ska map` reference (FastANI medoid — highest mean ANI to
+all others) is labelled **★** in the tree below and highlighted in the heatmap.
+
 ```{python}
 #| echo: false
 from IPython.display import HTML
 
+# Temporarily add the reference to highlights so draw_toytree colours it distinctly
+_ref_in_highlights = ref_name and ref_name not in highlights
+if _ref_in_highlights:
+    highlights[ref_name] = {'label': ref_name, 'color': '#d62728'}
+
 canvas, html_str, svg_str = draw_toytree(
     tt, title=f"FastANI NJ tree — {run_name}"
 )
+
+# Restore highlights so downstream plots are not affected
+if _ref_in_highlights:
+    del highlights[ref_name]
+
+# Inject a ★ label into the SVG/HTML next to the reference tip
+if ref_name:
+    html_str = html_str.replace(
+        f'>{ref_name}<',
+        f'>★ {ref_name}<',
+    )
+    svg_str = svg_str.replace(
+        f'>{ref_name}<',
+        f'>★ {ref_name}<',
+    )
+
 (figs_dir / "fastani_nj_tree.svg").write_text(svg_str)
 (figs_dir / "fastani_nj_tree.html").write_text(html_str)
 
@@ -456,8 +552,17 @@ sample_ani_df.to_csv(tables_dir / "fastani_per_sample_mean_ani.csv", index=False
 display(Markdown("**Summary statistics (all pairwise, self excluded):**"))
 display(ani_stats.to_html(index=False, classes='table table-sm table-hover'))
 display(Markdown(""))
-display(Markdown("**Per-sample mean ANI against all others** (lowest first — potential outliers at top):"))
-display(sample_ani_df.head(20).to_html(index=False, classes='table table-sm table-hover'))
+display(Markdown("**Per-sample mean ANI against all others** (lowest first — potential outliers at top). "
+                 "★ = selected as `ska map` reference (FastANI medoid):"))
+
+# Bold the reference row in the rendered table
+_html_table = sample_ani_df.head(20).to_html(index=False, classes='table table-sm table-hover')
+if ref_name:
+    _html_table = _html_table.replace(
+        f'<td>{ref_name}</td>',
+        f'<td><strong>★ {ref_name}</strong></td>',
+    )
+display(HTML(_html_table))
 ```
 
 ---
@@ -790,50 +895,591 @@ if not recomb_df.empty:
     fig_cf.show()
 ```
 
+### 3.5 Recombination block locations across the reference genome
+
+Each row is one sample; coloured bars span inferred recombination blocks at their
+reference-genome coordinates. Colour encodes the number of SNPs inside the block
+(darker = more SNPs). Samples with no recombination detected are shown as empty rows.
+Use the dropdown to compare thresholds. The ★ row marks the `ska map` reference genome.
+
+```{python}
+#| echo: false
+_any_blocks = any(not df.empty for df in gubbins_gff.values())
+
+if _any_blocks:
+    # Sample order: follow NJ tree leaf order where possible
+    _all_gff_samples = sorted({
+        s for df in gubbins_gff.values() for s in df['sample'].unique()
+    })
+    _ordered = [s for s in leaf_order if s in _all_gff_samples] + [
+        s for s in _all_gff_samples if s not in leaf_order
+    ]
+    # Add any samples from gubbins stats that had no recombination (not in GFF)
+    _stat_samples = sorted({
+        s for d in gubbins_data.values()
+        for s in d['stats']['Node']
+        if not str(s).startswith('Node_')
+    })
+    _ordered = _ordered + [s for s in _stat_samples if s not in _ordered]
+
+    _global_max_snp = max(
+        (int(df['snp_count'].max()) for df in gubbins_gff.values() if not df.empty),
+        default=1,
+    )
+
+    _all_traces = []
+    _mf_trace_counts = {}
+    for _mf in sorted(gubbins_gff.keys()):
+        _gff_df = gubbins_gff[_mf]
+        _traces  = []
+        for _samp in _ordered:
+            _sub = _gff_df[_gff_df['sample'] == _samp] if not _gff_df.empty else pd.DataFrame()
+            _label = f'★ {_samp}' if _samp == ref_name else _samp
+            if _sub.empty:
+                _traces.append(go.Bar(
+                    x=[0], y=[_label], base=[0], orientation='h',
+                    marker_color='rgba(0,0,0,0)', showlegend=False,
+                    hoverinfo='skip', visible=False,
+                ))
+            else:
+                _is_first_with_data = (
+                    _samp == next((s for s in _ordered
+                                   if not _gff_df[_gff_df['sample'] == s].empty), None)
+                )
+                _traces.append(go.Bar(
+                    x=_sub['length'].tolist(),
+                    y=[_label] * len(_sub),
+                    base=_sub['start'].tolist(),
+                    orientation='h',
+                    showlegend=False,
+                    visible=False,
+                    marker=dict(
+                        color=_sub['snp_count'].tolist(),
+                        colorscale='Oranges',
+                        cmin=0,
+                        cmax=_global_max_snp,
+                        showscale=_is_first_with_data,
+                        colorbar=dict(title='SNPs in block', thickness=14, x=1.01),
+                        opacity=0.8,
+                    ),
+                    customdata=_sub[['start', 'end', 'snp_count', 'node']].values,
+                    hovertemplate=(
+                        '<b>%{y}</b><br>'
+                        'Position: %{customdata[0]:,}–%{customdata[1]:,} bp<br>'
+                        'Block length: %{x:,} bp<br>'
+                        'SNPs in block: %{customdata[2]}<br>'
+                        'Node: %{customdata[3]}'
+                        '<extra></extra>'
+                    ),
+                ))
+        _mf_trace_counts[_mf] = len(_traces)
+        _all_traces.extend(_traces)
+
+    # Make first min_freq visible by default
+    _first_mf    = sorted(gubbins_gff.keys())[0]
+    _first_count = _mf_trace_counts[_first_mf]
+    for _i in range(_first_count):
+        _all_traces[_i].visible = True
+
+    fig_map = go.Figure(data=_all_traces)
+
+    # Dropdown: one button per min_freq
+    _buttons = []
+    _offset  = 0
+    for _mf in sorted(gubbins_gff.keys()):
+        _count = _mf_trace_counts[_mf]
+        _vis   = [False] * len(_all_traces)
+        for _i in range(_offset, _offset + _count):
+            _vis[_i] = True
+        _buttons.append(dict(
+            label=f'min_freq={_mf}',
+            method='update',
+            args=[
+                {'visible': _vis},
+                {'title': (f'Recombination block locations — '
+                           f'min_freq={_mf} — {run_name}')},
+            ],
+        ))
+        _offset += _count
+
+    _y_labels = ['★ ' + s if s == ref_name else s for s in _ordered]
+    fig_map.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Recombination block locations — min_freq={_first_mf} — {run_name}',
+        barmode='overlay',
+        xaxis=dict(title='Position on reference genome (bp)',
+                   range=[0, _genome_len],
+                   tickformat=','),
+        yaxis=dict(
+            tickfont=dict(size=9),
+            categoryorder='array',
+            categoryarray=list(reversed(_y_labels)),
+        ),
+        height=max(500, len(_ordered) * 13 + 180),
+        margin=dict(l=185, r=90, t=80),
+        updatemenus=[dict(
+            buttons=_buttons,
+            direction='down', showactive=True, x=0.01, y=1.06, xanchor='left',
+        )],
+    )
+    save_fig(fig_map, 'gubbins_recomb_map')
+    fig_map.show()
+else:
+    display(Markdown(
+        "> No recombination blocks detected at any tested min_freq threshold — "
+        "no location map to display."
+    ))
+```
+
 ---
 
-## 4. Suggested additional diagnostics
+## 4. Additional diagnostics
 
-The following diagnostics are not yet implemented in this report but are recommended
-for a thorough stage-2 assessment:
+```{python}
+#| include: false
+# ============================================================
+# Section 4 — shared data loading
+# ============================================================
 
-**Per-sample completeness across min-freq**
-:   For each sample and each min-freq threshold, compute the fraction of alignment
-    positions that are non-gap/non-N. This reveals which samples drive missing-data
-    inflation at a given threshold and may flag poorly assembled or contaminated
-    genomes. Requires reading the full SKA2 alignment FASTA files (~100–200 MB each);
-    the `pyfastx` package (available in this env) makes this fast.
+# 4.1 / 4.2 — Per-sample completeness (fraction non-gap / non-N)
+# Streams each SKA2 alignment FASTA; may take ~30–60 s for large datasets.
+completeness_data = {}   # mf -> {sample: frac_complete}
+for _mf_dir in sorted(explore_dir.glob("ska2/min_freq_*"),
+                      key=lambda p: float(p.name.split('_')[2])):
+    _mf  = float(_mf_dir.name.split('_')[2])
+    _aln = _mf_dir / "alignment.fasta"
+    if not _aln.exists():
+        continue
+    _sc = {}
+    _cur_name = _cur_total = _cur_ok = None
+    with open(_aln) as _fh:
+        for _line in _fh:
+            _line = _line.strip()
+            if _line.startswith('>'):
+                if _cur_name is not None:
+                    _sc[_cur_name] = _cur_ok / _cur_total if _cur_total else 0.0
+                _cur_name, _cur_total, _cur_ok = _line[1:].split()[0], 0, 0
+            elif _cur_name is not None:
+                _cur_total += len(_line)
+                _cur_ok    += sum(1 for ch in _line.upper() if ch not in ('-', 'N'))
+    if _cur_name is not None:
+        _sc[_cur_name] = _cur_ok / _cur_total if _cur_total else 0.0
+    completeness_data[_mf] = _sc
 
-**Pairwise SNP distance matrix**
-:   Run with `--ska_distance true` to obtain `ska2/distances.tsv` and a NJ tree based
-    on raw SNP counts rather than ANI. This is complementary to FastANI and more
-    sensitive within closely related samples. Can be visualised with the same
-    Plotly heatmap approach used above.
+# Shared ordered sample list for §4.1 and §4.2
+_all_comp_samps = sorted({s for d in completeness_data.values() for s in d})
+_stat_samps     = sorted({
+    s for d in gubbins_data.values()
+    for s in d['stats']['Node'] if not str(s).startswith('Node_')
+})
+_all_diag_samps = _all_comp_samps or _stat_samps
+_diag_order = (
+    [s for s in leaf_order if s in _all_diag_samps] +
+    [s for s in _all_diag_samps if s not in leaf_order]
+)
 
-**ANI vs SNP distance scatter**
-:   Plot pairwise ANI (from FastANI) against pairwise SNP distance (from `ska distance`)
-    for each sample pair. Outlier pairs that have high ANI but unexpectedly high SNP
-    distance may indicate assembly artefacts or recent recombination.
+# 4.3 / 4.4 — Pairwise SKA2 SNP distances (optional; requires --ska_distance true)
+_ska_dist_path = explore_dir / "ska2" / "distances.tsv"
+snp_dist_df = None
+if _ska_dist_path.exists():
+    try:
+        snp_dist_df = pd.read_csv(_ska_dist_path, sep='\t', index_col=0)
+        snp_dist_df = snp_dist_df.combine_first(snp_dist_df.T)
+    except Exception:
+        snp_dist_df = None
 
-**Missing data per sample at chosen min-freq**
-:   A bar chart of the number of gap/N positions per sample at the candidate min-freq
-    threshold. Samples with >5–10 % missing data are candidates for removal via
-    `--ska_delete_samples` before stage 3.
+# 4.5 — Robinson–Foulds distance helpers
+def _get_bipartitions(root_node, common_tips):
+    """Recursively collect bipartitions from a toytree root node."""
+    _bips = set()
+    def _walk(node):
+        if node.is_leaf():
+            return frozenset([node.name]) if node.name in common_tips else frozenset()
+        _below = frozenset().union(*[_walk(c) for c in node.children])
+        _above = common_tips - _below
+        if 1 < len(_below) < len(common_tips):
+            _bips.add(frozenset([_below, frozenset(_above)]))
+        return _below
+    _walk(root_node)
+    return _bips
 
-**Gubbins tree topology concordance**
-:   Compare the topology of the Gubbins final tree (`*.final_tree.tre`) with the FastANI
-    NJ tree using a normalised Robinson–Foulds distance (`Bio.Phylo` provides this).
-    Large disagreements may indicate recombination obscuring true genealogy.
+def _rf_dist(tt1, tt2):
+    """Return (norm_RF, raw_RF, n_bips_tt1, n_bips_tt2)."""
+    _common = frozenset(tt1.get_tip_labels()) & frozenset(tt2.get_tip_labels())
+    _bp1 = _get_bipartitions(tt1.treenode, _common)
+    _bp2 = _get_bipartitions(tt2.treenode, _common)
+    _raw = len(_bp1.symmetric_difference(_bp2))
+    _den = len(_bp1) + len(_bp2)
+    return (_raw / _den if _den else 0.0), _raw, len(_bp1), len(_bp2)
 
-**Recombination block size distribution**
-:   Parse `*.recombination_predictions.gff` to extract block lengths when recombination
-    is present. A histogram of block sizes helps assess whether Gubbins is calling
-    many short (potentially spurious) blocks or a few large (biologically plausible) ones.
+rf_rows = []
+for _mf in sorted(gubbins_data.keys()):
+    _gub_dir   = explore_dir / f"gubbins/min_freq_{_mf}"
+    _tre_files = [f for f in _gub_dir.glob("*.final_tree.tre")
+                  if 'node_labelled' not in f.name]
+    if not _tre_files:
+        continue
+    try:
+        _tt_g = toytree.tree(str(_tre_files[0])).ladderize()
+        _norm, _raw, _nb1, _nb2 = _rf_dist(tt, _tt_g)
+        rf_rows.append({'min_freq': _mf, 'rf_norm': round(_norm, 4),
+                        'rf_raw': _raw, 'n_bips_fastani': _nb1,
+                        'n_bips_gubbins': _nb2})
+    except Exception:
+        pass
+rf_df = pd.DataFrame(rf_rows)
+```
 
-**Genome-length outlier check**
-:   Compare the `Genome Length` column from Gubbins per-branch statistics. Genomes
-    significantly shorter or longer than the mean may be fragmented assemblies or
-    contain contamination.
+### 4.1 Per-sample completeness across min-freq
+
+Fraction of each sample's alignment positions called as ACGT (excluding gaps `–` and
+uncalled `N`) at every tested min_freq threshold. Low completeness at a given threshold
+means that sample has poor coverage at many positions — a candidate for removal.
+
+```{python}
+#| echo: false
+if completeness_data:
+    _mfs_c   = sorted(completeness_data.keys())
+    _comp_mat = np.array([
+        [completeness_data.get(mf, {}).get(s, np.nan) for mf in _mfs_c]
+        for s in _diag_order
+    ])
+
+    _ytick = ['★ ' + s if s == ref_name else s for s in _diag_order]
+    fig_comp_heat = go.Figure(go.Heatmap(
+        z=_comp_mat * 100,
+        x=[str(m) for m in _mfs_c],
+        y=_ytick,
+        colorscale='RdYlGn',
+        zmin=90, zmax=100,
+        colorbar=dict(title='Completeness (%)'),
+        hovertemplate='%{y}<br>min_freq=%{x}<br>Completeness: %{z:.2f}%<extra></extra>',
+    ))
+    fig_comp_heat.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Per-sample alignment completeness — {run_name}',
+        xaxis=dict(title='min_freq'),
+        yaxis=dict(tickfont=dict(size=9), autorange='reversed'),
+        height=max(550, len(_diag_order) * 13 + 120),
+        margin=dict(l=190),
+    )
+    save_fig(fig_comp_heat, 'completeness_heatmap')
+    fig_comp_heat.show()
+
+    _comp_df = pd.DataFrame(_comp_mat * 100, index=_diag_order,
+                            columns=[str(m) for m in _mfs_c])
+    _comp_df.index.name = 'Sample'
+    _comp_df.to_csv(tables_dir / 'completeness_per_sample.csv')
+else:
+    display(Markdown('> No alignment FASTA files found — completeness heatmap unavailable.'))
+```
+
+### 4.2 Missing data candidates for removal
+
+Samples with > 5 % missing data (gaps + N) are highlighted as candidates for
+`--ska_delete_samples` before Stage 3. Dropdown switches the min_freq threshold.
+
+```{python}
+#| echo: false
+if completeness_data:
+    _mfs_m       = sorted(completeness_data.keys())
+    _miss_traces = []
+    for _mf in _mfs_m:
+        _d     = completeness_data[_mf]
+        _samps = [s for s in _diag_order if s in _d]
+        _miss  = [(1 - _d[s]) * 100 for s in _samps]
+        _clrs  = ['#d62728' if m > 10 else '#ff7f0e' if m > 5 else '#1f77b4'
+                  for m in _miss]
+        _ylabs = ['★ ' + s if s == ref_name else s for s in _samps]
+        _miss_traces.append(go.Bar(
+            x=_miss, y=_ylabs, orientation='h',
+            marker_color=_clrs,
+            visible=(_mf == _mfs_m[-1]),
+            hovertemplate='%{y}<br>Missing: %{x:.2f} %<extra></extra>',
+            showlegend=False,
+        ))
+
+    _miss_btns = [
+        dict(
+            label=f'min_freq={_mf}',
+            method='update',
+            args=[
+                {'visible': [i == _j for i in range(len(_mfs_m))]},
+                {'title': f'Missing data per sample — min_freq={_mf} — {run_name}'},
+            ],
+        )
+        for _j, _mf in enumerate(_mfs_m)
+    ]
+
+    _yrev = list(reversed(['★ ' + s if s == ref_name else s for s in _diag_order]))
+    fig_miss = go.Figure(data=_miss_traces)
+    fig_miss.add_vline(x=5,  line=dict(color='orange', dash='dash', width=1.5),
+                       annotation_text='5 %',  annotation_position='top right')
+    fig_miss.add_vline(x=10, line=dict(color='red',    dash='dash', width=1.5),
+                       annotation_text='10 %', annotation_position='top right')
+    fig_miss.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Missing data per sample — min_freq={_mfs_m[-1]} — {run_name}',
+        xaxis=dict(title='Missing data (% of alignment length)', rangemode='tozero'),
+        yaxis=dict(tickfont=dict(size=9), categoryorder='array', categoryarray=_yrev),
+        height=max(500, len(_diag_order) * 13 + 150),
+        margin=dict(l=190),
+        updatemenus=[dict(buttons=_miss_btns, direction='down', showactive=True,
+                          x=0.01, y=1.06, xanchor='left')],
+    )
+    save_fig(fig_miss, 'missing_data_per_sample')
+    fig_miss.show()
+```
+
+### 4.3 Pairwise SNP distance matrix
+
+Raw pairwise SNP distances from `ska distance`, more sensitive than ANI within very
+closely related samples. Requires re-running with `--ska_distance true`.
+
+```{python}
+#| echo: false
+if snp_dist_df is not None:
+    _sd_samps = ([s for s in leaf_order if s in snp_dist_df.index] +
+                 [s for s in snp_dist_df.index if s not in leaf_order])
+    _sd_mat   = snp_dist_df.reindex(index=_sd_samps, columns=_sd_samps)
+    _sd_tick  = ['★ ' + s if s == ref_name else s for s in _sd_samps]
+
+    fig_snp_h = go.Figure(go.Heatmap(
+        z=_sd_mat.values, x=_sd_tick, y=_sd_tick,
+        colorscale='Blues_r', colorbar=dict(title='SNP distance'),
+        hovertemplate='%{y} vs %{x}<br>SNP dist: %{z:,}<extra></extra>',
+    ))
+    fig_snp_h.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Pairwise SKA2 SNP distances — {run_name}',
+        xaxis=dict(tickfont=dict(size=8), tickangle=-45),
+        yaxis=dict(tickfont=dict(size=8), autorange='reversed'),
+        height=max(600, len(_sd_samps) * 13 + 120),
+        width=max(650,  len(_sd_samps) * 13 + 180),
+        margin=dict(l=190, b=190),
+    )
+    save_fig(fig_snp_h, 'snp_distance_heatmap')
+    fig_snp_h.show()
+    snp_dist_df.to_csv(tables_dir / 'snp_distances.csv')
+else:
+    display(HTML(
+        '<div class="callout callout-style-default callout-note callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        '<div class="callout-title-container flex-fill">SNP distances not available</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'<p>No <code>distances.tsv</code> found at '
+        f'<code>{_ska_dist_path}</code>. '
+        'Re-run with <code>--ska_distance true</code> to populate §4.3 and §4.4.</p>'
+        '</div></div>'
+    ))
+```
+
+### 4.4 ANI vs SNP distance
+
+Each point is one sample pair. Pairs with high FastANI but unexpectedly high SNP distance
+may indicate assembly artefacts or recent recombination. Requires §4.3 data.
+
+```{python}
+#| echo: false
+if snp_dist_df is not None:
+    _both = [s for s in snp_dist_df.index if s in ani_matrix.index]
+    _pair_rows = []
+    for _i, _s in enumerate(_both):
+        for _j, _t in enumerate(_both):
+            if _j <= _i:
+                continue
+            _av = ani_matrix.loc[_s, _t] if _s in ani_matrix.index else np.nan
+            _sv = snp_dist_df.loc[_s, _t] if _s in snp_dist_df.index else np.nan
+            if not (np.isnan(_av) or np.isnan(_sv)):
+                _pair_rows.append({'s1': _s, 's2': _t, 'ANI': _av, 'SNP_dist': _sv})
+    _pdf = pd.DataFrame(_pair_rows)
+    if not _pdf.empty:
+        _mu, _sd = _pdf['SNP_dist'].mean(), _pdf['SNP_dist'].std()
+        _pdf['outlier'] = _pdf['SNP_dist'] > _mu + 2 * _sd
+        fig_ani_snp = px.scatter(
+            _pdf, x='ANI', y='SNP_dist', color='outlier',
+            color_discrete_map={False: '#1f77b4', True: '#d62728'},
+            hover_data={'s1': True, 's2': True, 'ANI': ':.4f',
+                        'SNP_dist': True, 'outlier': False},
+            labels={'ANI': 'FastANI (%)', 'SNP_dist': 'SKA2 SNP distance'},
+            title=f'ANI vs SNP distance — {run_name}',
+        )
+        fig_ani_snp.add_hline(y=_mu + 2 * _sd,
+                              line=dict(color='red', dash='dash', width=1.5),
+                              annotation_text='mean + 2 SD',
+                              annotation_position='right')
+        fig_ani_snp.update_layout(**PLOTLY_LAYOUT, height=450)
+        save_fig(fig_ani_snp, 'ani_vs_snp_scatter')
+        fig_ani_snp.show()
+        _pdf.to_csv(tables_dir / 'ani_vs_snp_pairs.csv', index=False)
+else:
+    display(Markdown('> §4.3 data required — see §4.3 callout.'))
+```
+
+### 4.5 Gubbins tree topology concordance
+
+Normalised Robinson–Foulds (RF) distance between each Gubbins-corrected final tree and
+the FastANI NJ tree. RF = 0 means identical topology; RF = 1 is maximally different.
+Large values indicate the recombination correction substantially rerouted the phylogeny —
+expected when recombination is heavy.
+
+```{python}
+#| echo: false
+if not rf_df.empty:
+    fig_rf = go.Figure(go.Scatter(
+        x=rf_df['min_freq'].tolist(),
+        y=rf_df['rf_norm'].tolist(),
+        mode='lines+markers',
+        marker=dict(size=10, color='steelblue'),
+        line=dict(width=2),
+        customdata=rf_df[['rf_raw', 'n_bips_fastani', 'n_bips_gubbins']].values,
+        hovertemplate=(
+            'min_freq=%{x}<br>Normalised RF=%{y:.4f}<br>'
+            'Raw RF=%{customdata[0]}<br>'
+            'Biparts FastANI=%{customdata[1]}, Gubbins=%{customdata[2]}'
+            '<extra></extra>'
+        ),
+    ))
+    fig_rf.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Gubbins vs FastANI NJ — Robinson–Foulds distance — {run_name}',
+        xaxis=dict(title='min_freq', tickvals=rf_df['min_freq'].tolist()),
+        yaxis=dict(title='Normalised RF distance', range=[0, 1]),
+        height=380,
+    )
+    save_fig(fig_rf, 'gubbins_rf_distance')
+    fig_rf.show()
+
+    display(Markdown('**Per-threshold detail:**'))
+    display(rf_df.rename(columns={
+        'min_freq': 'min_freq', 'rf_norm': 'Normalised RF', 'rf_raw': 'Raw RF',
+        'n_bips_fastani': 'Bipartitions (FastANI)',
+        'n_bips_gubbins': 'Bipartitions (Gubbins)',
+    }).to_html(index=False, classes='table table-sm table-hover'))
+    rf_df.to_csv(tables_dir / 'gubbins_rf_distances.csv', index=False)
+else:
+    display(Markdown('> No Gubbins final trees found — RF concordance unavailable.'))
+```
+
+### 4.6 Recombination block size distribution
+
+Distribution of recombination block lengths (bp) across all samples at each min_freq.
+Many short blocks (< 1 kbp) may be false positives; long blocks (> 50 kbp) are typically
+genuine transfer events. All points shown; boxes mark median and IQR.
+
+```{python}
+#| echo: false
+_gff_nonempty = {mf: df for mf, df in gubbins_gff.items() if not df.empty}
+if _gff_nonempty:
+    _bsz_traces = []
+    for _mf, _df in sorted(_gff_nonempty.items()):
+        _lens = _df['length'].tolist()
+        _bsz_traces.append(go.Violin(
+            x=[str(_mf)] * len(_lens),
+            y=_lens,
+            name=str(_mf),
+            box_visible=True,
+            meanline_visible=True,
+            points='all',
+            pointpos=0,
+            jitter=0.3,
+            marker=dict(size=3, opacity=0.45),
+            hovertemplate='min_freq=%{x}<br>Block: %{y:,} bp<extra></extra>',
+        ))
+
+    fig_bsz = go.Figure(data=_bsz_traces)
+    for _ref_bp, _lbl in [(1_000, '1 kbp'), (10_000, '10 kbp'), (50_000, '50 kbp')]:
+        fig_bsz.add_hline(y=_ref_bp,
+                          line=dict(color='grey', dash='dot', width=1),
+                          annotation_text=_lbl, annotation_position='right')
+    fig_bsz.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Recombination block size distribution — {run_name}',
+        xaxis_title='min_freq',
+        yaxis=dict(title='Block length (bp)', type='log'),
+        showlegend=False,
+        height=480,
+    )
+    save_fig(fig_bsz, 'recomb_block_sizes')
+    fig_bsz.show()
+
+    _bsz_sum = pd.DataFrame([
+        {'min_freq': mf, 'N blocks': len(df), 'Median (bp)': int(df['length'].median()),
+         'Mean (bp)': int(df['length'].mean()), 'Min (bp)': int(df['length'].min()),
+         'Max (bp)': int(df['length'].max())}
+        for mf, df in sorted(_gff_nonempty.items())
+    ])
+    display(Markdown(''))
+    display(_bsz_sum.to_html(index=False, classes='table table-sm table-hover'))
+    _bsz_sum.to_csv(tables_dir / 'recomb_block_sizes.csv', index=False)
+else:
+    display(Markdown('> No recombination blocks detected — block size distribution unavailable.'))
+```
+
+### 4.7 Genome-length outlier check
+
+Genome lengths reported by Gubbins (the reference-coordinate alignment span per sample).
+Genomes more than 2 SD from the cohort mean are flagged; they may be fragmented assemblies
+or carry large insertions/deletions not present in most of the cohort.
+
+```{python}
+#| echo: false
+if not recomb_df.empty and 'Genome Length' in recomb_df.columns:
+    _gl = recomb_df[['Node', 'Genome Length', 'min_freq']].copy()
+    _gl['Genome Length'] = pd.to_numeric(_gl['Genome Length'], errors='coerce')
+    _gl = _gl.dropna(subset=['Genome Length'])
+
+    _gl_stats = (_gl.groupby('min_freq')['Genome Length']
+                   .agg(['mean', 'std']).reset_index())
+    _gl = _gl.merge(_gl_stats, on='min_freq')
+    _gl['z'] = (_gl['Genome Length'] - _gl['mean']) / _gl['std'].replace(0, np.nan)
+    _gl['outlier'] = _gl['z'].abs() > 2
+
+    fig_gl = go.Figure()
+    for _mf in sorted(_gl['min_freq'].unique()):
+        _sub = _gl[_gl['min_freq'] == _mf]
+        _xtick = [str(_mf)] * len(_sub)
+        _txt   = ['★ ' + r['Node'] if r['Node'] == ref_name else r['Node']
+                  for _, r in _sub.iterrows()]
+        fig_gl.add_trace(go.Box(
+            x=_xtick, y=_sub['Genome Length'].tolist(),
+            name=str(_mf), boxpoints=False,
+            marker_color='steelblue', showlegend=False,
+        ))
+        fig_gl.add_trace(go.Scatter(
+            x=_xtick, y=_sub['Genome Length'].tolist(),
+            mode='markers', text=_txt,
+            marker=dict(
+                size=7, opacity=0.75,
+                color=['#d62728' if o else '#1f77b4' for o in _sub['outlier']],
+            ),
+            hovertemplate='%{text}<br>Genome length: %{y:,} bp<extra></extra>',
+            showlegend=False,
+        ))
+    fig_gl.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Genome-length distribution — {run_name}',
+        xaxis_title='min_freq',
+        yaxis=dict(title='Genome length (bp)', tickformat=','),
+        boxmode='group', height=450,
+    )
+    save_fig(fig_gl, 'genome_length_outliers')
+    fig_gl.show()
+
+    _out = _gl[_gl['outlier']].sort_values('z', key=abs, ascending=False)
+    if not _out.empty:
+        display(Markdown(f'**{len(_out)} genome-length outlier(s) detected (|z| > 2):**'))
+        display(_out[['Node', 'min_freq', 'Genome Length', 'z']]
+                .rename(columns={'Node': 'Sample', 'z': 'Z-score'})
+                .round({'Z-score': 2})
+                .to_html(index=False, classes='table table-sm table-hover'))
+    else:
+        display(Markdown('All genome lengths within 2 SD of the per-threshold mean.'))
+    _gl.to_csv(tables_dir / 'genome_length_check.csv', index=False)
+else:
+    display(Markdown('> No Gubbins per-branch statistics — genome-length check unavailable.'))
+```
 
 ```{python}
 #| include: false
