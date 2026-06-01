@@ -4,10 +4,13 @@ include { SUBSPECIES_PHYLOGENY } from './workflows/subspecies_phylogeny'
 
 workflow {
     main:
-    // When resuming from a pre-computed merged SKF, no samplesheet is needed.
-    ch_input = params.ska_merged_skf
-        ? Channel.empty()
-        : Channel
+    // Parse the samplesheet whenever it is provided. In the normal (build) mode
+    // it is required. In --ska_merged_skf mode it is optional: the build/merge
+    // steps are skipped, but if the genomes are still supplied they are used to
+    // auto-select the FastANI medoid as the ska map reference for the Gubbins
+    // track (unless overridden by --ska_map_reference).
+    ch_input = params.input
+        ? Channel
             .fromPath(params.input, checkIfExists: true)
             .splitCsv(header: true)
             .map { row ->
@@ -17,6 +20,7 @@ workflow {
                     : file("${workflow.projectDir}/${row.fasta}", checkIfExists: true)
                 [ meta, fasta ]
             }
+        : Channel.empty()
 
     SUBSPECIES_PHYLOGENY(ch_input)
 }

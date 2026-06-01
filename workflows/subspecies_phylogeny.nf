@@ -29,8 +29,30 @@ workflow SUBSPECIES_PHYLOGENY {
     ch_nj_fastani  = Channel.empty()
     ch_map_reference = Channel.empty()
 
+    // The Gubbins track needs a reference for ska map. It is resolved in this
+    // order: (1) --ska_map_reference override, (2) the FastANI medoid of the
+    // input genomes. (2) requires the genomes themselves — a merged SKF cannot
+    // be fed to FastANI — so in --ska_merged_skf mode it only applies when the
+    // samplesheet is still supplied via --input.
+    gubbins_track_active = !params.skip_gubbins && !params.skip_alignment
+
     if (params.ska_merged_skf) {
         ch_merged_skf = Channel.fromPath(params.ska_merged_skf, checkIfExists: true)
+
+        // Auto-select the FastANI medoid when genomes are supplied and the user
+        // hasn't overridden the reference. FastANI is otherwise skipped in this
+        // mode, so only run it when the Gubbins track will actually use the result.
+        if (params.input && !params.ska_map_reference && gubbins_track_active) {
+            FASTANI_ALLVSALL(
+                ch_input.map { meta, fasta -> fasta }.collect()
+            )
+            SELECT_REFERENCE(
+                FASTANI_ALLVSALL.out.ani,
+                ch_input.map { meta, fasta -> fasta }.collect()
+            )
+            ch_versions      = ch_versions.mix(SELECT_REFERENCE.out.versions)
+            ch_map_reference = SELECT_REFERENCE.out.reference
+        }
     } else {
         FASTANI_ALLVSALL(
             ch_input.map { meta, fasta -> fasta }.collect()
@@ -62,6 +84,18 @@ workflow SUBSPECIES_PHYLOGENY {
     ch_ska_map_ref = params.ska_map_reference
         ? Channel.fromPath(params.ska_map_reference, checkIfExists: true)
         : ch_map_reference
+
+    // Warn loudly when the Gubbins track will silently produce nothing because
+    // no reference could be resolved: merged-SKF mode, no --ska_map_reference
+    // override, and no --input genomes to compute a medoid from.
+    if (params.ska_merged_skf && !params.ska_map_reference && !params.input && gubbins_track_active) {
+        log.warn(
+            "SKA2_MAP and GUBBINS will be skipped: --ska_merged_skf is set without " +
+            "--ska_map_reference, and no --input samplesheet was provided to auto-select " +
+            "a FastANI medoid reference. To run the Gubbins track, set --ska_map_reference " +
+            "<ref.fasta>, or pass --input <samplesheet.csv> to pick the medoid automatically."
+        )
+    }
 
     // -----------------------------------------------------------------------
     // Optional SKA2_DELETE: remove specified samples from the merged SKF.

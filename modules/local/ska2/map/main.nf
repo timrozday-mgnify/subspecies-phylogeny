@@ -24,7 +24,7 @@ process SKA2_MAP {
     ska map \\
         $args \\
         --ambig-mask \\
-        -o ${prefix} \\
+        -o ${prefix}.aln \\
         ${reference} \\
         ${skf}
 

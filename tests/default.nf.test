@@ -66,9 +66,10 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SKA2_ALIGN + 1 SNPSITES + 1 GUBBINS + 2 IQTREE
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 13 tasks
-                { assert workflow.trace.succeeded().size() == 13 }
+                // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
+                // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 16 tasks
+                { assert workflow.trace.succeeded().size() == 16 }
             )
         }
     }
@@ -85,8 +86,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub + 1 SKA2_DELETE = 14 tasks
-                { assert workflow.trace.succeeded().size() == 14 }
+                // same as default stub (16) + 1 SKA2_DELETE = 17 tasks
+                { assert workflow.trace.succeeded().size() == 17 }
             )
         }
     }
@@ -103,8 +104,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default stub + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 15 tasks
-                { assert workflow.trace.succeeded().size() == 15 }
+                // default stub (16) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 18 tasks
+                { assert workflow.trace.succeeded().size() == 18 }
             )
         }
     }
@@ -121,17 +122,21 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub + 1 SKA2_LO = 14 tasks
-                { assert workflow.trace.succeeded().size() == 14 }
+                // same as default stub (16) + 1 SKA2_LO = 17 tasks
+                { assert workflow.trace.succeeded().size() == 17 }
             )
         }
     }
 
-    test("resume from merged SKF - stub") {
+    test("resume from merged SKF, no input - stub") {
         options "-stub"
         when {
             params {
-                // No input samplesheet — upstream steps (incl. FastANI + NJ_TREE_FASTANI) are skipped
+                // No input samplesheet — build/merge, FastANI, NJ_TREE_FASTANI and
+                // SELECT_REFERENCE are all skipped. With no reference available, the
+                // Gubbins track (SKA2_MAP → GUBBINS + its IQTREE) is skipped too;
+                // SKA2_WEED still runs as it does not need a reference. A log.warn
+                // is emitted pointing the user to --ska_map_reference / --input.
                 ska_merged_skf = "${projectDir}/tests/data/dummy_merged.skf"
                 outdir         = "$outputDir"
             }
@@ -139,9 +144,33 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 1 SKA2_ALIGN + 1 SNPSITES + 1 GUBBINS + 2 IQTREE
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 7 tasks
-                { assert workflow.trace.succeeded().size() == 7 }
+                // 1 SKA2_ALIGN + 1 SNPSITES + 1 SKA2_WEED + 1 IQTREE (no_gubbins only)
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 6 tasks
+                { assert workflow.trace.succeeded().size() == 6 }
+            )
+        }
+    }
+
+    test("resume from merged SKF, with input auto-medoid - stub") {
+        options "-stub"
+        when {
+            params {
+                // Genomes still supplied via --input: build/merge are skipped (merged
+                // SKF is reused), but FASTANI + SELECT_REFERENCE run to auto-select the
+                // medoid as the ska map reference, so the full Gubbins track runs.
+                // NJ_TREE_FASTANI is not run in merged-SKF mode.
+                ska_merged_skf = "${projectDir}/tests/data/dummy_merged.skf"
+                input          = "${projectDir}/tests/samplesheets/test.csv"
+                outdir         = "$outputDir"
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 1 FASTANI + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
+                // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 11 tasks
+                { assert workflow.trace.succeeded().size() == 11 }
             )
         }
     }
@@ -159,8 +188,9 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 8 tasks
-                { assert workflow.trace.succeeded().size() == 8 }
+                // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 9 tasks
+                // (skip_alignment disables the whole align + Gubbins track)
+                { assert workflow.trace.succeeded().size() == 9 }
             )
         }
     }
@@ -178,9 +208,10 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SKA2_ALIGN + 1 SNPSITES + 1 GUBBINS
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 11 tasks
-                { assert workflow.trace.succeeded().size() == 11 }
+                // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
+                // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 14 tasks
+                { assert workflow.trace.succeeded().size() == 14 }
             )
         }
     }
@@ -197,12 +228,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 BUILD + 1 MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI (= 6)
-                // + 2 min_freq × (ALIGN + SNPSITES + GUBBINS) = 6
+                // 3 BUILD + 1 MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 7)
+                // + 2 min_freq × (ALIGN + SNPSITES + WEED + MAP + GUBBINS) = 10
                 // + 2 min_freq × 2 gubbins tracks × IQTREE = 4
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
-                // = 6 + 6 + 4 + 2 = 18 tasks
-                { assert workflow.trace.succeeded().size() == 18 }
+                // = 7 + 10 + 4 + 2 = 23 tasks
+                { assert workflow.trace.succeeded().size() == 23 }
             )
         }
     }
