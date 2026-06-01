@@ -22,7 +22,7 @@ process QUAST {
     def args = task.ext.args ?: ''
     prefix   = task.ext.prefix ?: "${meta.id}"
     """
-    metaquast.py \\
+    quast.py \\
         --output-dir ${prefix} \\
         --threads ${task.cpus} \\
         ${args} \\

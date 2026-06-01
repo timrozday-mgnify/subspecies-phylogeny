@@ -536,10 +536,10 @@ Pass to the pipeline: `--checkm_db /path/to/checkm_db`
 
 ```bash
 # Using the GUNC CLI (progenomes2 database, ~3.5 GB)
-gunc download_db /path/to/gunc_db/ --db progenomes2
+gunc download_db -db progenomes2 /path/to/gunc_db/
 
 # GTDB database (~11 GB, higher resolution)
-gunc download_db /path/to/gunc_db/ --db gtdb
+gunc download_db -db gtdb /path/to/gunc_db/
 ```
 
 Pass to the pipeline: `--gunc_db /path/to/gunc_db/gunc_db_progenomes2.0.dmnd`
@@ -563,11 +563,12 @@ Pass to the pipeline:
 ### MAGpurify (phylo-markers module, optional)
 
 ```bash
-# Using the MAGpurify CLI (~2 GB)
-magpurify download_db /path/to/magpurify_db/
+# Download from Zenodo (~2 GB) and extract
+wget https://zenodo.org/record/3688811/files/MAGpurify-db-v1.0.tar.bz2
+tar xjf MAGpurify-db-v1.0.tar.bz2 -C /path/to/magpurify_db/
 ```
 
-Pass to the pipeline: `--magpurify_db /path/to/magpurify_db/`
+Pass to the pipeline: `--magpurify_db /path/to/magpurify_db/MAGpurify-db-v1.0`
 
 The MAGpurify GC-content and tetranucleotide-frequency modules run without any database.
 
