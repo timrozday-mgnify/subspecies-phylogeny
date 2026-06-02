@@ -1,0 +1,34 @@
+# Stage 2 — Build
+#
+# Purpose: run the final maximum-likelihood phylogeny using the parameters
+# chosen after reviewing stage 1 outputs.  Both unmasked (no_gubbins) and
+# Gubbins-recombination-masked (gubbins) trees are inferred in parallel.
+#
+# Run with:
+#   nextflow run main.nf -profile docker \
+#       -params-file examples/stage2_build/params.yml \
+#       -c examples/stage2_build/modules.config
+#
+# Key outputs:
+#   results/02_build/iqtree/no_gubbins/min_freq_<f>/tree.treefile
+#   results/02_build/iqtree/gubbins/min_freq_<f>/tree.treefile
+#   results/02_build/gubbins/min_freq_<f>/                        — recombination stats
+#   results/02_build/multiqc/multiqc_report.html
+
+# Reuse the merged SKF built in stage 1 to skip the expensive per-sample
+# SKA2 build and FastANI steps.
+ska_merged_skf: "results/01_explore/ska2/merged.skf"
+outdir: "results/02_build"
+
+# Single min-freq value chosen from stage 1 exploration.
+ska_align_min_freq: "0.95"
+
+# Remove outliers identified during stage 1 (one sample name per line).
+# Sample names are FASTA basenames without extension; confirm with:
+#   ska nk results/01_explore/ska2/merged.skf
+# ska_delete_samples: "outliers.txt"
+
+# Provide the reference genome for the Gubbins track (ska map).
+# Either set this explicitly (FastANI medoid is a good choice) or also pass
+# --input samplesheet.csv to let the pipeline auto-select the medoid.
+# ska_map_reference: "/path/to/reference.fasta"

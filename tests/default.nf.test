@@ -254,7 +254,7 @@ nextflow_pipeline {
                 input   = "${projectDir}/tests/samplesheets/test.csv"
                 outdir  = "$outputDir"
                 skip_qc = false
-                // No db params set — only QUAST + MAGPURIFY run (database-free)
+                // No db params set — only QUAST + MAGPURIFY + BUSCO_BUSCO run (database-free)
             }
         }
         then {
@@ -262,6 +262,26 @@ nextflow_pipeline {
                 { assert workflow.success },
                 // default (16 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 25 tasks
                 { assert workflow.trace.succeeded().size() == 25 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub qc only") {
+        options "-stub"
+        when {
+            params {
+                input       = "${projectDir}/tests/samplesheets/test.csv"
+                outdir      = "$outputDir"
+                skip_phylo  = true
+                // skip_qc defaults to false — QC runs, phylogeny skipped entirely
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO (database-free QC)
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 11 tasks
+                { assert workflow.trace.succeeded().size() == 11 }
             )
         }
     }

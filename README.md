@@ -10,11 +10,8 @@ Input genomes are expected to be closely related — same species or subspecies.
 
 - [Quick start](#quick-start)
 - [Intended workflow](#intended-workflow)
-  - [Stage 0 — Genome QC](#step-0--genome-quality-control)
-  - [Stage 1 — Build merged SKF](#step-1--build-the-merged-skf)
-  - [Stage 2 — Explore min-freq](#step-2--explore-min-freq-values-and-remove-outliers)
-  - [Stage 3 — Trial Gubbins](#step-3--trial-gubbins-parameters)
-  - [Stage 4 — Final phylogeny](#step-4--run-iq-tree-to-produce-final-phylogenies)
+  - [Stage 1 — Explore](#stage-1--explore)
+  - [Stage 2 — Build](#stage-2--build)
 - [Genome QC](#genome-qc)
 - [Pipeline parameters](#pipeline-parameters)
 - [Output structure](#output-structure)
@@ -41,149 +38,106 @@ nextflow run main.nf \
 
 ## Intended workflow
 
-The pipeline is designed to be run in stages so that intermediate outputs can be inspected before committing to the computationally expensive steps.
+The pipeline runs in two stages. Stage 1 explores the dataset — running QC,
+building the alignment at multiple thresholds, and assessing recombination —
+without committing to tree inference. Stage 2 runs the final IQ-TREE phylogeny
+with the parameters chosen from stage 1.
 
-Each stage has a ready-to-use example in the `examples/` directory. Copy the relevant `params.yml` and `modules.config`, edit them for your dataset, and pass them to Nextflow:
-
-```bash
-nextflow run main.nf -profile docker \
-    -params-file examples/stage1_build/params.yml
-```
-
-Stages 2, 3, and 4 also take a `-c modules.config` to set tool-specific arguments:
+Ready-to-use examples live in `examples/`. Copy the `params.yml` and
+`modules.config`, edit for your dataset, and pass them to Nextflow:
 
 ```bash
 nextflow run main.nf -profile docker \
-    -params-file examples/stage3_trial/params.yml \
-    -c examples/stage3_trial/modules.config
+    -params-file examples/stage1_explore/params.yml \
+    -c examples/stage1_explore/modules.config
 ```
 
 ---
 
-### Step 0 — Genome quality control
+### Stage 1 — Explore
 
-**Example:** [`examples/stage0_qc/params.yml`](examples/stage0_qc/params.yml), [`examples/stage0_qc/modules.config`](examples/stage0_qc/modules.config)
+**Example:** [`examples/stage1_explore/params.yml`](examples/stage1_explore/params.yml), [`examples/stage1_explore/modules.config`](examples/stage1_explore/modules.config)
 
-Run genome QC before committing to phylogenetic analysis. This step assesses
-completeness, contamination, and chimeric content for each input genome. It also
-builds the merged SKF and runs FastANI, so the outputs serve double duty: QC
-reports for reviewing genome quality, plus the `merged.skf` reused in stage 1.
+Runs genome QC, builds the merged SKF, runs all-vs-all FastANI, trials a range
+of `--min-freq` alignment thresholds in parallel, and runs Gubbins recombination
+detection across all thresholds. IQ-TREE is skipped so the stage completes
+quickly. Review the outputs, choose your final min-freq value, and identify any
+genomes to remove before committing to stage 2.
 
 ```bash
 nextflow run main.nf -profile docker \
-    -params-file examples/stage0_qc/params.yml \
-    -c examples/stage0_qc/modules.config
+    -params-file examples/stage1_explore/params.yml \
+    -c examples/stage1_explore/modules.config
 ```
 
-Activate database-dependent tools by uncommenting and setting their paths in
-`params.yml` (see [Reference databases](#reference-databases)):
+**Outputs to review** (`results/01_explore/`):
 
-| Tool | Activated by |
-|---|---|
-| QUAST, MAGpurify | Always active |
-| CheckM2 | `checkm2_db` |
-| CheckM v1 | `checkm_db` |
-| GUNC | `gunc_db` |
-| BUSCO | `busco_lineage_db` + `busco_lineage` |
-
-**Outputs to review** (`results/00_qc/`):
+*Genome QC:*
 - `qc/quast/<sample>/` — N50, contig count, GC%
-- `qc/magpurify/<sample>/` — GC-content and tetranucleotide-frequency outlier contigs
+- `qc/magpurify/<sample>/` — per-contig chimera flags
 - `qc/checkm2/<sample>/` — completeness and contamination (ML-based)
-- `qc/checkm/<sample>/` — completeness and contamination (HMM-based, legacy)
+- `qc/checkm/<sample>/` — completeness and contamination (HMM, legacy)
 - `qc/gunc/<sample>/` — chimeric genome detection score
 - `qc/busco/<sample>/` — lineage-specific ortholog completeness
 - `fastani/fastani.txt` — pairwise ANI (flag samples < 95 % ANI to cohort)
-- `nj_tree/fastani_nj.nwk` — quick NJ tree (check for outlier branches)
-- `ska2/merged.skf` — pre-computed merged SKF for stage 1
+- `nj_tree/fastani_nj.nwk` — quick NJ tree (check for long outlier branches)
+
+*Alignment exploration:*
+- `ska2/min_freq_*/alignment.fasta` — SNP alignment per threshold; compare lengths
+- `snpsites/min_freq_*/` — variable-site counts per threshold
+- `gubbins/min_freq_*/` — Gubbins recombination predictions per threshold
+
+*Reuse in stage 2:*
+- `ska2/merged.skf` — pass to `--ska_merged_skf` to skip rebuilding
+- `ska2/skf/` — per-sample SKF basenames (for `--ska_delete_samples`)
 
 **Decision guidance:**
 
-- CheckM2 completeness < 90 % or contamination > 5 % → consider removing the genome
-- GUNC maxCSS > 0.45 → genome may be chimeric; inspect further
-- FastANI ANI < 95 % to cohort median → may be the wrong species
-- MAGpurify flagged contigs → review and optionally clean the FASTA
+| Signal | Action |
+|---|---|
+| CheckM2 completeness < 90 % or contamination > 5 % | Remove genome |
+| GUNC maxCSS > 0.45 | Chimeric — inspect and consider removing |
+| FastANI ANI < 95 % to cohort median | Wrong species — remove |
+| Unusually high contig count (QUAST) | Fragmented assembly — review |
+| Alignment length drops steeply above a threshold | Choose that threshold |
 
-To remove problem genomes: add their FASTA basenames (without extension) to a
-plain-text file and pass it to `--ska_delete_samples` in stage 2.
+To remove problem genomes: add their FASTA basenames (without `.fa`/`.fasta`)
+to a plain-text file (one per line) and uncomment `ska_delete_samples` in
+`params.yml`. Confirm exact names with `ska nk results/01_explore/ska2/merged.skf`.
 
-::: {.callout-note}
-A Quarto report for stage 0 QC results will be added once example outputs are available.
-:::
+**Activate database-dependent QC tools** by uncommenting their paths in `params.yml`
+(see [Reference databases](#reference-databases)):
+
+| Tool | Database parameter |
+|---|---|
+| QUAST, MAGpurify, BUSCO | Always run (no database required by default) |
+| CheckM2 | `checkm2_db` |
+| CheckM v1 | `checkm_db` |
+| GUNC | `gunc_db` |
+| BUSCO (pre-downloaded, faster) | `busco_lineage_db` + `busco_lineage` |
 
 ---
 
-### Step 1 — Build the merged SKF
+### Stage 2 — Build
 
-**Example:** [`examples/stage1_build/params.yml`](examples/stage1_build/params.yml)
+**Example:** [`examples/stage2_build/params.yml`](examples/stage2_build/params.yml), [`examples/stage2_build/modules.config`](examples/stage2_build/modules.config)
 
-Run with `--skip_alignment` to build per-sample `.skf` files and merge them. FastANI all-vs-all runs at the same time, producing a pairwise ANI table and a neighbour-joining tree that can be used to spot outliers.
-
-```bash
-nextflow run main.nf -profile docker \
-    -params-file examples/stage1_build/params.yml
-```
-
-**Outputs to inspect:**
-- `results/01_build/ska2/merged.skf` — merged split-kmer file for reuse in later steps
-- `results/01_build/fastani/fastani.txt` — pairwise ANI table
-- `results/01_build/nj_tree/fastani_nj.nwk` — quick NJ tree from ANI distances; check for any genomes that cluster far from the rest
-
-If any genomes look like outliers in the FastANI tree, add their names to a plain-text file (one name per line) for use with `--ska_delete_samples` in the next step. Sample names correspond to the FASTA filename basename (without extension), which may differ from the samplesheet `sample` column — check `ska2/skf/` filenames to confirm exact names, or run `ska nk results/01_build/ska2/merged.skf`.
-
-### Step 2 — Explore min-freq values and remove outliers
-
-**Example:** [`examples/stage2_explore/params.yml`](examples/stage2_explore/params.yml), [`examples/stage2_explore/modules.config`](examples/stage2_explore/modules.config)
-
-Use the pre-computed merged SKF to trial a range of `--min-freq` values for `ska align`. This step is fast because it skips the genome-building phase. Optionally remove outlier samples identified in step 1.
+Runs the final IQ-TREE phylogeny using the parameters chosen from stage 1.
+Reuses the merged SKF so the SKA2 build and FastANI steps are skipped.
+Both the unmasked (`no_gubbins`) and Gubbins-masked (`gubbins`) trees are
+inferred in parallel.
 
 ```bash
 nextflow run main.nf -profile docker \
-    -params-file examples/stage2_explore/params.yml \
-    -c examples/stage2_explore/modules.config
+    -params-file examples/stage2_build/params.yml \
+    -c examples/stage2_build/modules.config
 ```
 
-`--min-freq` controls what fraction of samples must have a called base at a position for it to be included in the alignment. Lower values retain more positions at the cost of more missing data; higher values give a cleaner but smaller alignment. Examine the alignment lengths in `ska2/min_freq_*/alignment.fasta` alongside the Gubbins recombination maps in `gubbins/min_freq_*/` to choose a value.
-
-**Outputs to inspect:**
-- `ska2/min_freq_*/alignment.fasta` — SNP alignment at each frequency threshold; compare lengths
-- `snpsites/min_freq_*/` — variable-sites counts
-- `gubbins/min_freq_*/` — Gubbins recombination predictions at each threshold
-
-### Step 3 — Trial Gubbins parameters
-
-**Example:** [`examples/stage3_trial/params.yml`](examples/stage3_trial/params.yml), [`examples/stage3_trial/modules.config`](examples/stage3_trial/modules.config)
-
-With a chosen min-freq value, run the full alignment block (with `--skip_iqtree`) to inspect the Gubbins outputs before committing to tree inference. Adjust Gubbins parameters in `modules.config` (see [Configuring tool arguments](#configuring-tool-arguments)).
-
-```bash
-nextflow run main.nf -profile docker \
-    -params-file examples/stage3_trial/params.yml \
-    -c examples/stage3_trial/modules.config
-```
-
-Re-run this stage (updating `modules.config`) until satisfied with the recombination predictions and filtered alignments.
-
-**Outputs to inspect:**
-- `gubbins/min_freq_0.9/*.recombination_predictions.gff` — predicted recombinant regions
-- `gubbins/min_freq_0.9/*.filtered_polymorphic_sites.fasta` — recombination-free alignment that will feed IQ-TREE; check this is non-empty and has a reasonable number of variable sites
-
-### Step 4 — Run IQ-TREE to produce final phylogenies
-
-**Example:** [`examples/stage4_final/params.yml`](examples/stage4_final/params.yml), [`examples/stage4_final/modules.config`](examples/stage4_final/modules.config)
-
-Once satisfied with the alignment and Gubbins parameters, copy the finalised settings from stage 3 into `examples/stage4_final/modules.config`, add IQ-TREE model and bootstrap arguments, then run the full pipeline. Both the unmasked (`no_gubbins`) and Gubbins-masked (`gubbins`) trees are inferred in parallel.
-
-```bash
-nextflow run main.nf -profile docker \
-    -params-file examples/stage4_final/params.yml \
-    -c examples/stage4_final/modules.config
-```
-
-**Outputs:**
-- `results/04_final/iqtree/no_gubbins/min_freq_0.9/tree.treefile`
-- `results/04_final/iqtree/gubbins/min_freq_0.9/tree.treefile`
-- `results/04_final/multiqc/multiqc_report.html`
+**Outputs** (`results/02_build/`):
+- `iqtree/no_gubbins/min_freq_0.95/tree.treefile` — ML tree without recombination masking
+- `iqtree/gubbins/min_freq_0.95/tree.treefile` — ML tree with Gubbins masking
+- `gubbins/min_freq_0.95/` — Gubbins recombination statistics
+- `multiqc/multiqc_report.html`
 
 ---
 
@@ -206,8 +160,7 @@ only** — no genomes are filtered from the downstream analysis. Skip the entire
 QUAST and MAGpurify (gc-content + tetra-freq modules) run on every genome whenever
 `--skip_qc` is not set, regardless of database availability. The remaining tools only run
 when their database path is supplied. See [Reference databases](#reference-databases) for
-download instructions and [Step 0](#step-0--genome-quality-control) for the recommended
-stage-0 workflow.
+download instructions and [Stage 1](#stage-1--explore) for the recommended workflow.
 
 Outputs are published under `results/qc/<toolname>/<sample>/`.
 
@@ -221,6 +174,7 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 | `--outdir` | `./results` | Output directory |
 | `--ska_k` | `31` | K-mer size for `ska build`. Larger values increase specificity at the cost of sensitivity in more diverged genomes |
 | `--ska_align_min_freq` | `0.9` | Comma-separated list of `--min-freq` values for `ska align`, e.g. `"0.5,0.9,1.0"`. Each value is run as a separate analysis branch |
+| `--skip_phylo` | `false` | Skip all phylogenetic steps (FastANI, SKA2 build, alignment, Gubbins, IQ-TREE). Genome QC still runs. Use to run QC only |
 | `--skip_alignment` | `false` | Skip `ska align` and all downstream steps. Produces only the merged SKF and FastANI outputs |
 | `--skip_gubbins` | `false` | Skip Gubbins recombination filtering. IQ-TREE runs on snp-sites output only (no gubbins track) |
 | `--skip_iqtree` | `false` | Skip IQ-TREE. Alignment, snp-sites, and Gubbins still run on all branches. Useful for inspecting alignments before tree inference |
@@ -233,8 +187,8 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 | `--checkm2_db` | `null` | Path to CheckM2 DIAMOND database file (`.dmnd`). CheckM2 only runs when this is set |
 | `--checkm_db` | `null` | Path to CheckM v1 database root directory. CheckM only runs when this is set |
 | `--gunc_db` | `null` | Path to GUNC DIAMOND database file (`.dmnd`). GUNC only runs when this is set |
-| `--busco_lineage_db` | `null` | Path to directory of pre-downloaded BUSCO lineage datasets. BUSCO only runs when this is set |
-| `--busco_lineage` | `null` | BUSCO lineage name (e.g. `bacteria_odb10`). Defaults to `auto_prok` when not set |
+| `--busco_lineage_db` | `null` | Path to pre-downloaded BUSCO lineage datasets directory. When not set, BUSCO auto-detects lineage and downloads at runtime (slower, needs internet in container) |
+| `--busco_lineage` | `null` | BUSCO lineage name (e.g. `bacteria_odb10`). Defaults to `auto_prok` |
 | `--magpurify_db` | `null` | Path to MAGpurify database directory for the `phylo-markers` module (optional) |
 | `--multiqc_title` | `null` | Custom title for the MultiQC report |
 | `--max_cpus` | `16` | Maximum CPUs available per process |
@@ -246,12 +200,14 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 ## Output structure
 
 ```
-results/                              (example layout using stage0_qc → stage4_final)
-  00_qc/                             stage 0 outputs
-    qc/  fastani/  nj_tree/  ska2/   see detail below
-  01_build/  02_explore/  ...        stages 1–4 (see below)
+results/                              (example layout using stage1_explore → stage2_build)
+  01_explore/                        stage 1 outputs
+    qc/  fastani/  nj_tree/  ska2/   QC and build outputs (detail below)
+    snpsites/  gubbins/              alignment exploration
+  02_build/                          stage 2 outputs
+    gubbins/  iqtree/  multiqc/
 
-results/                              (per-stage QC detail)
+results/                              (QC detail, within 01_explore/)
   qc/
     quast/<sample>/
       report.html                     QUAST assembly report
@@ -309,7 +265,7 @@ results/                              (per-stage QC detail)
 
 ## Configuring tool arguments
 
-Tool-specific arguments are injected via `ext.args` in a Nextflow config file. The stage 0 example config at [`examples/stage0_qc/modules.config`](examples/stage0_qc/modules.config) contains commented-out overrides for each QC tool. Create a `custom.config` for any stage:
+Tool-specific arguments are injected via `ext.args` in a Nextflow config file. The stage 1 example config at [`examples/stage1_explore/modules.config`](examples/stage1_explore/modules.config) contains commented-out overrides for each QC tool, SKA2, and Gubbins. The stage 2 config at [`examples/stage2_build/modules.config`](examples/stage2_build/modules.config) shows the IQ-TREE arguments. Create a `custom.config` for any run:
 
 ```bash
 nextflow run main.nf -profile docker -c custom.config --input samplesheet.csv --outdir results
@@ -463,27 +419,28 @@ highlights:
 
 Pass the **absolute path** to the file via `-P highlights_file:...`.
 
-### Stage 2 — Explore min-freq values
+### Stage 1 — Explore report
 
 ```bash
 conda run -n quarto quarto render \
-    /path/to/subspecies-phylogeny/notebooks/stage2_explore.qmd \
-    -P build_dir:/absolute/path/to/run/results/01_build \
-    -P explore_dir:/absolute/path/to/run/results/02_explore \
+    /path/to/subspecies-phylogeny/notebooks/stage1_explore.qmd \
+    -P build_dir:/absolute/path/to/run/results/01_explore \
+    -P explore_dir:/absolute/path/to/run/results/01_explore \
+    -P qc_dir:/absolute/path/to/run/results/01_explore \
     -P run_name:MyRun \
     -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
     --output-dir /absolute/path/to/run/notebooks/
 ```
 
-Quarto resolves `-P` paths relative to the **notebook file**, not the working directory, so absolute paths are required for `build_dir`, `explore_dir`, and `highlights_file`.
+Quarto resolves `-P` paths relative to the **notebook file**, not the working directory, so absolute paths are required.
 
-### Stage 4 — Final phylogeny
+### Stage 2 — Build report
 
 ```bash
 conda run -n quarto quarto render \
-    /path/to/subspecies-phylogeny/notebooks/stage4_final.qmd \
-    -P build_dir:/absolute/path/to/run/results/01_build \
-    -P final_dir:/absolute/path/to/run/results/04_final \
+    /path/to/subspecies-phylogeny/notebooks/stage2_build.qmd \
+    -P build_dir:/absolute/path/to/run/results/01_explore \
+    -P final_dir:/absolute/path/to/run/results/02_build \
     -P run_name:MyRun \
     -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
     -P min_freq:0.95 \
@@ -492,12 +449,13 @@ conda run -n quarto quarto render \
 
 | Parameter | Description |
 |---|---|
-| `build_dir` | Stage 1 results directory (`01_build`) |
-| `explore_dir` | Stage 2 results directory (`02_explore`) — stage 2 report only |
-| `final_dir` | Stage 4 results directory (`04_final`) — stage 4 report only |
+| `build_dir` | Stage 1 results directory (`01_explore`) — FastANI and SKA2 build outputs |
+| `explore_dir` | Stage 1 results directory (`01_explore`) — alignment and Gubbins outputs |
+| `qc_dir` | Stage 1 results directory (`01_explore`) — QC outputs |
+| `final_dir` | Stage 2 results directory (`02_build`) — stage 2 report only |
 | `run_name` | Label shown in figure titles |
 | `highlights_file` | Path to highlights YAML (see above); omit to render without highlighting |
-| `min_freq` | The `--min-freq` value used for the final run; selects which subdirectory to read — stage 4 report only |
+| `min_freq` | The `--min-freq` value used for the final run — stage 2 report only |
 
 Rendered HTML files are self-contained (`embed-resources: true`) and can be shared without additional assets. Figures and tables are also saved to `results/<stage>/figs/stage<N>/` and `results/<stage>/tables/stage<N>/` respectively.
 

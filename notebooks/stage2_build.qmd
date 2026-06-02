@@ -1,5 +1,5 @@
 ---
-title: "Stage 4: Final Phylogeny"
+title: "Stage 2: Build"
 date: today
 format:
   html:
@@ -12,7 +12,7 @@ format:
 jupyter: basicpython
 params:
   build_dir: "../results/01_build"
-  final_dir: "../results/04_final"
+  final_dir: "../results/02_build"
   run_name: "pipeline run"
   highlights_file: ""
   min_freq: "0.95"
@@ -22,9 +22,9 @@ params:
 Render command (use absolute paths — Quarto resolves paths relative to the notebook file):
 
   conda run -n quarto quarto render \
-      /path/to/subspecies-phylogeny/notebooks/stage4_final.qmd \
+      /path/to/subspecies-phylogeny/notebooks/stage2_build.qmd \
       -P build_dir:/absolute/path/to/run/results/01_build \
-      -P final_dir:/absolute/path/to/run/results/04_final \
+      -P final_dir:/absolute/path/to/run/results/02_build \
       -P run_name:MyRun \
       -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
       -P min_freq:0.95 \
@@ -45,7 +45,7 @@ Static image export for Plotly figures (PNG/SVG) requires kaleido:
 #| include: false
 # Default parameter values — overridden by -P flags at render time
 build_dir       = "../results/01_build"
-final_dir       = "../results/04_final"
+final_dir       = "../results/02_build"
 run_name        = "pipeline run"
 highlights_file = ""
 min_freq        = "0.95"

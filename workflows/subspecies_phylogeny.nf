@@ -35,11 +35,24 @@ workflow SUBSPECIES_PHYLOGENY {
         ch_versions = ch_versions.mix(GENOME_QC.out.versions)
     }
 
+    // Pre-declare output channels so the emit block is always valid regardless
+    // of which optional steps are enabled.
+    ch_alignment  = Channel.empty()
+    ch_snp_sites  = Channel.empty()
+    ch_gubbins    = Channel.empty()
+    ch_phylogeny  = Channel.empty()
+    ch_distances  = Channel.empty()
+    ch_nj_fastani = Channel.empty()
+    ch_nj_ska2    = Channel.empty()
+    ch_lo_snps    = Channel.empty()
+    ch_lo_indels  = Channel.empty()
+
+    if (!params.skip_phylo) {
+
     // -----------------------------------------------------------------------
     // Upstream: either run the full BUILD → MERGE chain or skip straight to
     // alignment using a pre-computed merged SKF file.
     // -----------------------------------------------------------------------
-    ch_nj_fastani  = Channel.empty()
     ch_map_reference = Channel.empty()
 
     // The Gubbins track needs a reference for ska map. It is resolved in this
@@ -157,13 +170,6 @@ workflow SUBSPECIES_PHYLOGENY {
         ch_lo_indels = SKA2_LO.out.indels
     }
 
-    // Pre-declare output channels so the emit block is always valid regardless
-    // of which optional steps are enabled.
-    ch_alignment = Channel.empty()
-    ch_snp_sites = Channel.empty()
-    ch_gubbins   = Channel.empty()
-    ch_phylogeny = Channel.empty()
-
     if (!params.skip_alignment) {
         // -----------------------------------------------------------------------
         // SKA2_ALIGN: fan out over every requested --min-freq value.
@@ -246,8 +252,10 @@ workflow SUBSPECIES_PHYLOGENY {
         }
     }
 
+    } // end !params.skip_phylo
+
     // -----------------------------------------------------------------------
-    // Software versions → MultiQC
+    // Software versions → MultiQC (always run)
     // -----------------------------------------------------------------------
     CUSTOM_DUMPSOFTWAREVERSIONS(ch_versions.collect())
 

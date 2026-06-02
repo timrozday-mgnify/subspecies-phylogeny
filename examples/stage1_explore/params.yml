@@ -1,0 +1,91 @@
+# Stage 1 — Explore
+#
+# Purpose: run genome QC, build the merged SKF, run all-vs-all FastANI, trial
+# a range of --min-freq values for the alignment, and assess recombination
+# across all thresholds using Gubbins.  IQ-TREE is skipped so this stage
+# completes quickly; you review the outputs and choose final parameters before
+# committing to stage 2.
+#
+# Run with:
+#   nextflow run main.nf -profile docker \
+#       -params-file examples/stage1_explore/params.yml \
+#       -c examples/stage1_explore/modules.config
+#
+# Outputs to review before proceeding to stage 2:
+#
+#   QC:
+#     results/01_explore/qc/                   — per-genome QC reports
+#     results/01_explore/fastani/fastani.txt   — pairwise ANI (flag < 95 % ANI outliers)
+#     results/01_explore/nj_tree/fastani_nj.nwk — quick NJ tree; flag long branches
+#
+#   Alignment exploration:
+#     results/01_explore/ska2/min_freq_*/alignment.fasta — compare lengths across thresholds
+#     results/01_explore/snpsites/min_freq_*/            — variable-site counts
+#
+#   Recombination:
+#     results/01_explore/gubbins/min_freq_*/             — recombination predictions per threshold
+#
+#   Reuse in stage 2:
+#     results/01_explore/ska2/merged.skf                 — pass to --ska_merged_skf in stage 2
+#     results/01_explore/ska2/skf/                       — per-sample SKF names (for --ska_delete_samples)
+#
+# Deciding on parameters for stage 2:
+#   - Choose --ska_align_min_freq based on alignment length vs missing-data trade-off.
+#   - If any genomes look like outliers (ANI, N50, contamination, GUNC), add their
+#     FASTA basenames to a plain-text file for --ska_delete_samples.
+#   - Copy the Gubbins settings from modules.config that gave the best recombination
+#     predictions into examples/stage2_build/modules.config.
+
+input: "samplesheet.csv"
+outdir: "results/01_explore"
+
+# K-mer size. 31 works well for same-species genomes; increase (41, 51) for
+# slightly more diverged sets to reduce spurious k-mer matches.
+ska_k: 31
+
+# Trial several min-freq thresholds in parallel.  Lower values (e.g. 0.5)
+# retain positions present in fewer samples, giving longer alignments with
+# more missing data; higher values (e.g. 1.0) give shorter, cleaner
+# alignments.  0.9 is a reasonable default.
+ska_align_min_freq: "0.5,0.6,0.7,0.8,0.9,0.95,1.0"
+
+# Skip IQ-TREE — inspect alignment and recombination outputs before committing
+# to a full tree inference.
+skip_iqtree: true
+
+# To run genome QC only (skip all phylogenetic steps including FastANI and SKA2),
+# set skip_phylo: true instead and remove the skip_iqtree line above.
+# skip_phylo: true
+
+# Optionally compute pairwise SNP distances (produces distances.tsv, read by
+# the stage 1 Quarto report §4.3/§4.4).
+ska_distance: true
+
+# ------ Genome QC databases ------------------------------------------------
+#
+# QUAST, MAGpurify, and BUSCO run unconditionally.  BUSCO uses --auto-lineage-prok
+# by default (internet access required in container).  The tools below only run
+# when their database path is uncommented.  See README "Reference databases".
+
+# CheckM2 DIAMOND database (~3.5 GB)
+# checkm2_db: "/path/to/checkm2_db/uniref100.KO.1.dmnd"
+
+# CheckM v1 database root directory (~1.4 GB)
+# checkm_db: "/path/to/checkm_db"
+
+# GUNC DIAMOND database (~3.5 GB, progenomes2)
+# gunc_db: "/path/to/gunc_db/gunc_db_progenomes2.0.dmnd"
+
+# Pre-downloaded BUSCO lineage datasets (faster + offline; see README)
+# busco_lineage_db: "/path/to/busco_downloads"
+# busco_lineage:    "bacteria_odb10"
+
+# MAGpurify database for phylo-markers module (~2 GB, optional)
+# magpurify_db: "/path/to/magpurify_db"
+
+# ------ Outlier removal (optional) ----------------------------------------
+#
+# After reviewing QC outputs and the FastANI NJ tree, list any genomes to
+# remove (one sample name per line; use FASTA basename without extension).
+# Run: ska nk results/01_explore/ska2/merged.skf  to confirm exact names.
+# ska_delete_samples: "outliers.txt"
