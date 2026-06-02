@@ -74,19 +74,22 @@ workflow GENOME_QC {
     }
 
     // -----------------------------------------------------------------------
-    // BUSCO — lineage-specific single-copy ortholog completeness; requires database.
+    // BUSCO — lineage-specific single-copy ortholog completeness.
+    // Always runs.  When busco_lineage_db is set, that pre-downloaded dataset
+    // is used (fast, reproducible, works offline).  Without it, BUSCO downloads
+    // the lineage at runtime using --auto-lineage-prok (~20–60 min/genome,
+    // requires internet access inside the container).
     // -----------------------------------------------------------------------
-    if (params.busco_lineage_db) {
-        ch_busco_db = Channel.value(
-            file(params.busco_lineage_db, checkIfExists: true)
-        )
-        BUSCO_BUSCO(
-            ch_input,
-            params.busco_lineage ?: 'auto_prok',
-            ch_busco_db
-        )
-        ch_versions = ch_versions.mix(BUSCO_BUSCO.out.versions.first())
-    }
+    ch_busco_db = params.busco_lineage_db
+        ? Channel.value(file(params.busco_lineage_db, checkIfExists: true))
+        : Channel.value([])
+
+    BUSCO_BUSCO(
+        ch_input,
+        params.busco_lineage ?: 'auto_prok',
+        ch_busco_db
+    )
+    ch_versions = ch_versions.mix(BUSCO_BUSCO.out.versions.first())
 
     emit:
     versions = ch_versions

@@ -13,6 +13,7 @@ jupyter: basicpython
 params:
   build_dir: "../results/01_build"
   explore_dir: "../results/02_explore"
+  qc_dir: ""
   run_name: "pipeline run"
   highlights_file: ""
 ---
@@ -33,6 +34,7 @@ Render command (use absolute paths — Quarto resolves paths relative to the not
       /Users/timrozday/Documents/subspecies-phylogeny/notebooks/stage2_explore.qmd \
       -P build_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/01_build \
       -P explore_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/02_explore \
+      -P qc_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/00_qc \
       -P run_name:Buniformis \
       --output-dir /Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/notebooks/
 
@@ -50,6 +52,7 @@ Static image export for Plotly figures (PNG/SVG) requires kaleido:
 # Default parameter values — overridden by -P flags at render time
 build_dir       = "../results/01_build"
 explore_dir     = "../results/02_explore"
+qc_dir          = ""
 run_name        = "pipeline run"
 highlights_file = ""
 ```
@@ -86,6 +89,7 @@ warnings.filterwarnings('ignore')
 # Convert injected param strings to Path objects
 build_dir   = Path(build_dir)
 explore_dir = Path(explore_dir)
+qc_dir_path = Path(qc_dir) if qc_dir and str(qc_dir).strip() else None
 run_name    = str(run_name)
 
 # ---- Highlights config -----------------------------------------------
@@ -263,6 +267,95 @@ for mf_dir in sorted(explore_dir.glob("gubbins/min_freq_*"),
 
 available_gubbins_mf = sorted(gubbins_data.keys())
 
+# --- Stage 0 genome QC (optional — only when qc_dir is supplied) -----------
+def _read_qc_tool(qc_subdir, glob_pattern, read_fn):
+    """Glob per-sample directories, read one file each, concatenate."""
+    rows = []
+    base = qc_dir_path / qc_subdir if qc_dir_path else None
+    if not (base and base.exists()):
+        return pd.DataFrame()
+    for sample_dir in sorted(base.iterdir()):
+        files = list(sample_dir.glob(glob_pattern))
+        if files:
+            try:
+                rows.append(read_fn(files[0], sample_dir.name))
+            except Exception:
+                pass
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+def _read_tsv(path, _):    return pd.read_csv(path, sep='\t')
+def _read_tsv_checkm(path, _): return pd.read_csv(path, sep='\t')
+
+checkm2_df = _read_qc_tool("qc/checkm2", "*_checkm2_report.tsv", lambda p, _: pd.read_csv(p, sep='\t'))
+checkm_df  = _read_qc_tool("qc/checkm",  "*_checkm_qa.tsv",      lambda p, _: pd.read_csv(p, sep='\t'))
+gunc_df    = _read_qc_tool("qc/gunc",    "*.maxCSS_level.tsv",   lambda p, _: pd.read_csv(p, sep='\t'))
+
+# QUAST: report.tsv is long format (metric, value) — pivot to wide
+_quast_rows = []
+_quast_base = (qc_dir_path / "qc/quast") if qc_dir_path else None
+if _quast_base and _quast_base.exists():
+    for _sdir in sorted(_quast_base.iterdir()):
+        _report = _sdir / _sdir.name / "report.tsv"
+        if _report.exists():
+            _raw = pd.read_csv(_report, sep='\t', header=None, names=['metric', 'value'])
+            _row = {'Sample': _sdir.name}
+            _row.update(dict(zip(_raw['metric'], _raw['value'])))
+            _quast_rows.append(_row)
+quast_qc_df = pd.DataFrame(_quast_rows) if _quast_rows else pd.DataFrame()
+
+# MAGpurify: count lines in flagged_contigs files (dir = <sample>_magpurify)
+_mag_rows = []
+_mag_base = (qc_dir_path / "qc/magpurify") if qc_dir_path else None
+if _mag_base and _mag_base.exists():
+    for _d in sorted(_mag_base.iterdir()):
+        _sample = _d.name.removesuffix('_magpurify')
+        _row = {'Sample': _sample}
+        for _mod in ('gc-content', 'tetra-freq', 'phylo-markers'):
+            _fc = _d / _mod / 'flagged_contigs'
+            if _fc.exists():
+                _lines = [l for l in _fc.read_text().splitlines() if l.strip()]
+                _row[f'{_mod}_flagged'] = len(_lines)
+        _mag_rows.append(_row)
+magpurify_qc_df = pd.DataFrame(_mag_rows) if _mag_rows else pd.DataFrame()
+
+# Build combined QC summary table
+_qc_key_cols = []
+_qc_parts = []
+if not checkm2_df.empty:
+    _c2 = checkm2_df[['Name', 'Completeness', 'Contamination']].copy()
+    _c2.columns = ['Sample', 'CheckM2 Complete (%)', 'CheckM2 Contam (%)']
+    _c2 = _c2.round({'CheckM2 Complete (%)': 1, 'CheckM2 Contam (%)': 2})
+    _qc_parts.append(_c2.set_index('Sample'))
+if not checkm_df.empty:
+    _ck = checkm_df[['Bin Id', 'Completeness', 'Contamination', 'Strain heterogeneity']].copy()
+    _ck.columns = ['Sample', 'CheckM Complete (%)', 'CheckM Contam (%)', 'CheckM Strain het (%)']
+    _ck = _ck.round(2)
+    _qc_parts.append(_ck.set_index('Sample'))
+if not gunc_df.empty:
+    _gc = gunc_df[['genome', 'pass.GUNC', 'clade_separation_score']].copy()
+    _gc.columns = ['Sample', 'GUNC pass', 'GUNC CSS']
+    _gc['GUNC CSS'] = _gc['GUNC CSS'].round(3)
+    _qc_parts.append(_gc.set_index('Sample'))
+if not quast_qc_df.empty:
+    _qst = quast_qc_df[['Sample', '# contigs', 'Total length', 'N50', 'GC (%)']].copy()
+    _qst = _qst.rename(columns={'Total length': 'Genome size (bp)'})
+    _qst[['# contigs', 'Genome size (bp)', 'N50']] = \
+        _qst[['# contigs', 'Genome size (bp)', 'N50']].apply(pd.to_numeric, errors='coerce')
+    _qst['GC (%)'] = pd.to_numeric(_qst['GC (%)'], errors='coerce').round(1)
+    _qst[['# contigs', 'Genome size (bp)', 'N50']] = \
+        _qst[['# contigs', 'Genome size (bp)', 'N50']].astype('Int64')
+    _qc_parts.append(_qst.set_index('Sample'))
+if not magpurify_qc_df.empty:
+    _mp = magpurify_qc_df.rename(columns={
+        'gc-content_flagged':   'MAGp GC flag',
+        'tetra-freq_flagged':   'MAGp tetra flag',
+        'phylo-markers_flagged':'MAGp phylo flag',
+    }).set_index('Sample')
+    _qc_parts.append(_mp)
+
+qc_summary_df = pd.concat(_qc_parts, axis=1).reset_index().rename(columns={'index': 'Sample'}) \
+    if _qc_parts else pd.DataFrame()
+
 # --- Reference genome (SELECT_REFERENCE medoid) ----------------------
 # Try the published reference.fa; fall back to the highest-mean-ANI sample.
 ref_name = None
@@ -412,6 +505,272 @@ if len(align_rows) == 0:
         'and that the pipeline ran to completion.</p>'
         '</div></div>'
     ))
+```
+
+---
+
+## 0. Genome quality control
+
+```{python}
+#| echo: false
+from IPython.display import HTML
+if qc_dir_path and qc_dir_path.exists() and not qc_summary_df.empty:
+    display(Markdown(f"QC results loaded from `{qc_dir_path.resolve()}` "
+                     f"({len(qc_summary_df)} genomes)."))
+elif qc_dir_path:
+    display(HTML(
+        '<div class="callout callout-style-default callout-warning callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        '<div class="callout-title-container flex-fill">QC directory not found</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'<p><code>{qc_dir_path}</code> does not exist. '
+        'Re-render with <code>-P qc_dir:/path/to/results/00_qc</code> to populate this section.</p>'
+        '</div></div>'
+    ))
+else:
+    display(HTML(
+        '<div class="callout callout-style-default callout-note callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        '<div class="callout-title-container flex-fill">No QC results supplied</div></div>'
+        '<div class="callout-body-container callout-body">'
+        '<p>Pass <code>-P qc_dir:/path/to/results/00_qc</code> to include stage 0 '
+        'genome quality metrics in this report.</p>'
+        '</div></div>'
+    ))
+```
+
+::: {.callout-tip}
+**Exclusion thresholds (guidelines):**
+
+- **CheckM2 / CheckM completeness** < 90 % → consider excluding (insufficient marker coverage)
+- **CheckM2 / CheckM contamination** > 5 % → consider excluding (likely mixed bin)
+- **GUNC `pass.GUNC`** = False → chimeric genome; inspect further
+- **QUAST `# contigs`** >> cohort median → fragmented assembly; may inflate missing data
+- **MAGpurify** flagged contigs → review individually; rarely a hard exclusion criterion
+:::
+
+### 0.1 Summary table
+
+```{python}
+#| echo: false
+if not qc_summary_df.empty:
+    # Colour helper — returns CSS background for a cell value given thresholds
+    def _cell_bg(col, val):
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return ''
+        if 'Complete' in col:
+            return 'background:#d4edda' if v >= 90 else ('background:#fff3cd' if v >= 50 else 'background:#f8d7da')
+        if 'Contam' in col:
+            return 'background:#d4edda' if v <= 5 else ('background:#fff3cd' if v <= 10 else 'background:#f8d7da')
+        if 'CSS' in col:
+            return 'background:#f8d7da' if v > 0.45 else 'background:#d4edda'
+        return ''
+
+    _cols = list(qc_summary_df.columns)
+    _header = ''.join(f'<th>{c}</th>' for c in _cols)
+    _rows_html = []
+    for _, row in qc_summary_df.iterrows():
+        _cells = []
+        for col in _cols:
+            val = row[col]
+            if col == 'Sample':
+                _cells.append(f'<td><b>{val}</b></td>')
+            elif col == 'GUNC pass':
+                bg = 'background:#d4edda' if val is True else ('background:#f8d7da' if val is False else '')
+                label = '✓' if val is True else ('✗' if val is False else '—')
+                _cells.append(f'<td style="{bg};text-align:center">{label}</td>')
+            else:
+                bg = _cell_bg(col, val)
+                disp = '—' if pd.isna(val) else val
+                _cells.append(f'<td style="{bg}">{disp}</td>')
+        _rows_html.append('<tr>' + ''.join(_cells) + '</tr>')
+
+    _table_html = (
+        '<div style="overflow-x:auto">'
+        '<table class="table table-sm table-hover" style="font-size:0.85rem">'
+        f'<thead><tr>{_header}</tr></thead>'
+        '<tbody>' + '\n'.join(_rows_html) + '</tbody>'
+        '</table></div>'
+        '<p style="font-size:0.8rem;color:#666">'
+        '🟢 passes threshold &nbsp; 🟡 marginal &nbsp; 🔴 fails threshold</p>'
+    )
+    display(HTML(_table_html))
+
+    # Save summary table
+    qc_summary_df.to_csv(tables_dir / 'genome_qc_summary.csv', index=False)
+    display(Markdown(f"*Saved to `{(tables_dir / 'genome_qc_summary.csv').resolve()}`*"))
+```
+
+### 0.2 Completeness and contamination
+
+```{python}
+#| echo: false
+if not checkm2_df.empty:
+    _c2 = checkm2_df.copy()
+    _c2['GUNC pass'] = None
+    if not gunc_df.empty:
+        _gmap = gunc_df.set_index('genome')['pass.GUNC'].to_dict()
+        _c2['GUNC pass'] = _c2['Name'].map(_gmap)
+
+    _c2['_color'] = _c2['GUNC pass'].map(
+        {True: '#2196f3', False: '#e53935', None: '#888888'}
+    ).fillna('#888888')
+    _c2['_label'] = _c2['GUNC pass'].map(
+        {True: 'GUNC: pass', False: 'GUNC: FAIL', None: 'GUNC: n/a'}
+    ).fillna('GUNC: n/a')
+
+    fig_c2 = go.Figure()
+    for _lbl, _grp in _c2.groupby('_label', sort=False):
+        fig_c2.add_trace(go.Scatter(
+            x=_grp['Contamination'], y=_grp['Completeness'],
+            mode='markers',
+            name=_lbl,
+            marker=dict(size=10, color=_grp['_color'].iloc[0], opacity=0.8,
+                        line=dict(width=1, color='white')),
+            text=_grp['Name'],
+            hovertemplate='<b>%{text}</b><br>Completeness: %{y:.1f}%<br>'
+                          'Contamination: %{x:.2f}%<extra></extra>',
+        ))
+    # Threshold lines
+    fig_c2.add_hline(y=90, line=dict(color='orange', dash='dash', width=1.5),
+                     annotation_text='90 %', annotation_position='right')
+    fig_c2.add_vline(x=5,  line=dict(color='red',    dash='dash', width=1.5),
+                     annotation_text='5 %',  annotation_position='top right')
+    fig_c2.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'CheckM2 completeness vs contamination — {run_name}',
+        xaxis=dict(title='Contamination (%)', rangemode='tozero'),
+        yaxis=dict(title='Completeness (%)', range=[0, 101]),
+        height=480, legend=dict(title='GUNC result'),
+    )
+    save_fig(fig_c2, 'qc_checkm2_scatter')
+    fig_c2.show()
+```
+
+### 0.3 Assembly statistics (QUAST)
+
+```{python}
+#| echo: false
+if not quast_qc_df.empty:
+    _qst = quast_qc_df.copy()
+    _qst['N50'] = pd.to_numeric(_qst['N50'], errors='coerce')
+    _qst['# contigs'] = pd.to_numeric(_qst['# contigs'], errors='coerce')
+    _qst_ord = [s for s in leaf_order if s in _qst['Sample'].values] + \
+               [s for s in _qst['Sample'] if s not in leaf_order]
+
+    fig_n50 = go.Figure()
+    fig_n50.add_trace(go.Bar(
+        x=_qst.set_index('Sample').reindex(_qst_ord)['N50'].tolist(),
+        y=_qst_ord,
+        orientation='h',
+        marker_color='steelblue',
+        hovertemplate='%{y}<br>N50: %{x:,} bp<extra></extra>',
+    ))
+    fig_n50.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Assembly N50 — {run_name}',
+        xaxis=dict(title='N50 (bp)', tickformat=','),
+        yaxis=dict(tickfont=dict(size=9),
+                   categoryorder='array', categoryarray=list(reversed(_qst_ord))),
+        height=max(450, len(_qst_ord) * 14 + 100),
+        margin=dict(l=190),
+    )
+    save_fig(fig_n50, 'qc_assembly_n50')
+    fig_n50.show()
+
+    # Contig count — flag high values
+    _n_med = _qst['# contigs'].median()
+    _clrs = ['#d62728' if n > _n_med * 3 else '#1f77b4'
+             for n in _qst.set_index('Sample').reindex(_qst_ord)['# contigs']]
+    fig_nc = go.Figure(go.Bar(
+        x=_qst.set_index('Sample').reindex(_qst_ord)['# contigs'].tolist(),
+        y=_qst_ord,
+        orientation='h',
+        marker_color=_clrs,
+        hovertemplate='%{y}<br># contigs: %{x}<extra></extra>',
+    ))
+    fig_nc.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Number of contigs — {run_name}',
+        xaxis_title='# contigs (red = > 3× median)',
+        yaxis=dict(tickfont=dict(size=9),
+                   categoryorder='array', categoryarray=list(reversed(_qst_ord))),
+        height=max(450, len(_qst_ord) * 14 + 100),
+        margin=dict(l=190),
+    )
+    save_fig(fig_nc, 'qc_contig_count')
+    fig_nc.show()
+```
+
+### 0.4 Chimeric content (GUNC + MAGpurify)
+
+```{python}
+#| echo: false
+if not gunc_df.empty:
+    _gf = gunc_df.copy()
+    _gf_ord = [s for s in leaf_order if s in _gf['genome'].values] + \
+              [s for s in _gf['genome'] if s not in leaf_order]
+    _gf_re = _gf.set_index('genome').reindex(_gf_ord)
+    _clrs_g = ['#d62728' if not p else '#1f77b4' for p in _gf_re['pass.GUNC']]
+
+    fig_gunc = go.Figure(go.Bar(
+        x=_gf_re['clade_separation_score'].tolist(),
+        y=_gf_ord,
+        orientation='h',
+        marker_color=_clrs_g,
+        hovertemplate='%{y}<br>CSS: %{x:.4f}<extra></extra>',
+    ))
+    fig_gunc.add_vline(x=0.45, line=dict(color='red', dash='dash', width=1.5),
+                       annotation_text='0.45', annotation_position='top right')
+    fig_gunc.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'GUNC clade separation score — {run_name}',
+        xaxis=dict(title='Clade separation score (red = FAIL, threshold 0.45)',
+                   rangemode='tozero'),
+        yaxis=dict(tickfont=dict(size=9),
+                   categoryorder='array', categoryarray=list(reversed(_gf_ord))),
+        height=max(450, len(_gf_ord) * 14 + 100),
+        margin=dict(l=190),
+    )
+    save_fig(fig_gunc, 'qc_gunc_css')
+    fig_gunc.show()
+
+if not magpurify_qc_df.empty:
+    _mf = magpurify_qc_df.copy()
+    _mf_ord = [s for s in leaf_order if s in _mf['Sample'].values] + \
+              [s for s in _mf['Sample'] if s not in leaf_order]
+    _mf_re = _mf.set_index('Sample').reindex(_mf_ord)
+
+    fig_mag = go.Figure()
+    for _col, _name, _clr in [
+        ('gc-content_flagged',   'GC-content', '#4e79a7'),
+        ('tetra-freq_flagged',   'Tetra-freq', '#f28e2b'),
+        ('phylo-markers_flagged','Phylo-markers','#e15759'),
+    ]:
+        if _col in _mf_re.columns:
+            fig_mag.add_trace(go.Bar(
+                x=_mf_re[_col].fillna(0).tolist(),
+                y=_mf_ord, orientation='h', name=_name,
+                marker_color=_clr, opacity=0.8,
+                hovertemplate='%{y}<br>' + _name + ': %{x} contig(s)<extra></extra>',
+            ))
+    fig_mag.update_layout(
+        **PLOTLY_LAYOUT,
+        barmode='stack',
+        title=f'MAGpurify flagged contigs per sample — {run_name}',
+        xaxis_title='# flagged contigs',
+        yaxis=dict(tickfont=dict(size=9),
+                   categoryorder='array', categoryarray=list(reversed(_mf_ord))),
+        height=max(450, len(_mf_ord) * 14 + 100),
+        margin=dict(l=190),
+        legend=dict(title='Module'),
+    )
+    save_fig(fig_mag, 'qc_magpurify_flagged')
+    fig_mag.show()
 ```
 
 ---

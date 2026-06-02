@@ -260,8 +260,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (16 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY = 22 tasks
-                { assert workflow.trace.succeeded().size() == 22 }
+                // default (16 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 25 tasks
+                { assert workflow.trace.succeeded().size() == 25 }
             )
         }
     }
