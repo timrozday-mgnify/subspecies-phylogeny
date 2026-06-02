@@ -50,7 +50,7 @@ process MAGPURIFY {
 
     if [ "${run_phylo}" = "true" ]; then
         PYTHONPATH="/tmp/py_patch:\${PYTHONPATH:-}" \\
-            magpurify phylo-markers ${fasta} ${db} ${prefix}_magpurify ${args}
+            magpurify phylo-markers --db ${db} ${fasta} ${prefix}_magpurify ${args}
     fi
 
     cat <<-END_VERSIONS > versions.yml
