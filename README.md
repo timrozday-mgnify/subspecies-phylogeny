@@ -20,6 +20,10 @@ Input genomes are expected to be closely related — same species or subspecies.
   - [Gubbins](#gubbins-arguments)
   - [IQ-TREE](#iq-tree-arguments)
 - [Samplesheet format](#samplesheet-format)
+- [Generating reports](#generating-reports)
+  - [Stage 1 — Explore report](#stage-1--explore-report)
+  - [Stage 1 — BUSCO report](#stage-1--busco-report)
+  - [Stage 2 — Build report](#stage-2--build-report)
 - [Reference databases](#reference-databases)
 - [Requirements](#requirements)
 
@@ -424,9 +428,7 @@ Pass the **absolute path** to the file via `-P highlights_file:...`.
 ```bash
 conda run -n quarto quarto render \
     /path/to/subspecies-phylogeny/notebooks/stage1_explore.qmd \
-    -P build_dir:/absolute/path/to/run/results/01_explore \
-    -P explore_dir:/absolute/path/to/run/results/01_explore \
-    -P qc_dir:/absolute/path/to/run/results/01_explore \
+    -P results_dir:/absolute/path/to/run/results/01_explore \
     -P run_name:MyRun \
     -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
     --output-dir /absolute/path/to/run/notebooks/
@@ -434,28 +436,48 @@ conda run -n quarto quarto render \
 
 Quarto resolves `-P` paths relative to the **notebook file**, not the working directory, so absolute paths are required.
 
+The report renders gracefully with partial results — FastANI, alignment, and Gubbins sections are skipped with an informational callout if those outputs are not yet present.
+
+### Stage 1 — BUSCO report
+
+A separate focused report for BUSCO lineage completeness results:
+
+```bash
+conda run -n quarto quarto render \
+    /path/to/subspecies-phylogeny/notebooks/stage1_busco.qmd \
+    -P busco_dir:/absolute/path/to/run/results/01_explore/qc/busco \
+    -P run_name:MyRun \
+    --output-dir /absolute/path/to/run/notebooks/
+```
+
+| Parameter | Description |
+|---|---|
+| `busco_dir` | Path to the BUSCO output directory — `results/01_explore/qc/busco` |
+| `work_dir` | Path to the Nextflow `work/` directory. Only needed for runs before the `publishDir` fix; the notebook will locate the most recent successful `short_summary` per sample there. Leave unset for current runs |
+| `run_name` | Label shown in figure titles |
+| `nj_tree_nwk` | Optional path to a NJ tree (`.nwk`) to order samples by phylogeny in charts |
+
 ### Stage 2 — Build report
 
 ```bash
 conda run -n quarto quarto render \
     /path/to/subspecies-phylogeny/notebooks/stage2_build.qmd \
-    -P build_dir:/absolute/path/to/run/results/01_explore \
-    -P final_dir:/absolute/path/to/run/results/02_build \
+    -P explore_dir:/absolute/path/to/run/results/01_explore \
+    -P build_dir:/absolute/path/to/run/results/02_build \
     -P run_name:MyRun \
     -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
     -P min_freq:0.95 \
     --output-dir /absolute/path/to/run/notebooks/
 ```
 
-| Parameter | Description |
-|---|---|
-| `build_dir` | Stage 1 results directory (`01_explore`) — FastANI and SKA2 build outputs |
-| `explore_dir` | Stage 1 results directory (`01_explore`) — alignment and Gubbins outputs |
-| `qc_dir` | Stage 1 results directory (`01_explore`) — QC outputs |
-| `final_dir` | Stage 2 results directory (`02_build`) — stage 2 report only |
-| `run_name` | Label shown in figure titles |
-| `highlights_file` | Path to highlights YAML (see above); omit to render without highlighting |
-| `min_freq` | The `--min-freq` value used for the final run — stage 2 report only |
+| Parameter | Report | Description |
+|---|---|---|
+| `results_dir` | stage 1 | Stage 1 results directory (`01_explore`) — all QC, FastANI, alignment, and Gubbins outputs |
+| `explore_dir` | stage 2 | Stage 1 results directory (`01_explore`) |
+| `build_dir` | stage 2 | Stage 2 results directory (`02_build`) — IQ-TREE trees and Gubbins stats |
+| `run_name` | both | Label shown in figure titles |
+| `highlights_file` | both | Path to highlights YAML (see above); omit to render without highlighting |
+| `min_freq` | stage 2 | The `--min-freq` value used for the final run |
 
 Rendered HTML files are self-contained (`embed-resources: true`) and can be shared without additional assets. Figures and tables are also saved to `results/<stage>/figs/stage<N>/` and `results/<stage>/tables/stage<N>/` respectively.
 

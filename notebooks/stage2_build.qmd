@@ -11,8 +11,8 @@ format:
     fig-responsive: true
 jupyter: basicpython
 params:
-  build_dir: "../results/01_build"
-  final_dir: "../results/02_build"
+  explore_dir: "../results/01_explore"
+  build_dir: "../results/02_build"
   run_name: "pipeline run"
   highlights_file: ""
   min_freq: "0.95"
@@ -23,8 +23,8 @@ Render command (use absolute paths — Quarto resolves paths relative to the not
 
   conda run -n quarto quarto render \
       /path/to/subspecies-phylogeny/notebooks/stage2_build.qmd \
-      -P build_dir:/absolute/path/to/run/results/01_build \
-      -P final_dir:/absolute/path/to/run/results/02_build \
+      -P explore_dir:/absolute/path/to/run/results/01_explore \
+      -P build_dir:/absolute/path/to/run/results/02_build \
       -P run_name:MyRun \
       -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
       -P min_freq:0.95 \
@@ -44,8 +44,8 @@ Static image export for Plotly figures (PNG/SVG) requires kaleido:
 #| tags: [parameters]
 #| include: false
 # Default parameter values — overridden by -P flags at render time
-build_dir       = "../results/01_build"
-final_dir       = "../results/02_build"
+explore_dir     = "../results/01_explore"
+build_dir       = "../results/02_build"
 run_name        = "pipeline run"
 highlights_file = ""
 min_freq        = "0.95"
@@ -73,13 +73,13 @@ import re
 
 warnings.filterwarnings('ignore')
 
-build_dir = Path(build_dir)
-final_dir = Path(final_dir)
-run_name  = str(run_name)
-min_freq  = str(min_freq).strip()
+explore_dir = Path(explore_dir)
+build_dir   = Path(build_dir)
+run_name    = str(run_name)
+min_freq    = str(min_freq).strip()
 
-figs_dir   = final_dir / "figs"   / "stage4"
-tables_dir = final_dir / "tables" / "stage4"
+figs_dir   = build_dir / "figs"   / "stage4"
+tables_dir = build_dir / "tables" / "stage4"
 figs_dir.mkdir(parents=True, exist_ok=True)
 tables_dir.mkdir(parents=True, exist_ok=True)
 
@@ -155,9 +155,9 @@ def tip_size(name):
 # ============================================================
 mf_label = f"min_freq_{min_freq}"
 
-iqtree_no_gubbins_dir = final_dir / "iqtree" / "no_gubbins" / mf_label
-iqtree_gubbins_dir    = final_dir / "iqtree" / "gubbins"    / mf_label
-gubbins_dir           = final_dir / "gubbins" / mf_label
+iqtree_no_gubbins_dir = build_dir / "iqtree" / "no_gubbins" / mf_label
+iqtree_gubbins_dir    = build_dir / "iqtree" / "gubbins"    / mf_label
+gubbins_dir           = build_dir / "gubbins" / mf_label
 
 HAS_GUBBINS_TREE = (iqtree_gubbins_dir / "tree.treefile").exists()
 HAS_GUBBINS_OUT  = gubbins_dir.exists() and any(gubbins_dir.glob("*.per_branch_statistics.csv"))

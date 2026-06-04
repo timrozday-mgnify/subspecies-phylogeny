@@ -1,0 +1,506 @@
+---
+title: "BUSCO lineage analysis"
+date: today
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    toc-title: "Contents"
+    theme: cosmo
+    fig-responsive: true
+jupyter: basicpython
+params:
+  busco_dir: "../results/01_explore/qc/busco"
+  work_dir: ""
+  run_name: "pipeline run"
+  nj_tree_nwk: ""
+---
+
+<!--
+Render command (use absolute paths):
+
+  conda run -n quarto quarto render \
+      /path/to/subspecies-phylogeny/notebooks/stage1_busco.qmd \
+      -P busco_dir:/absolute/path/to/run/results/01_explore/qc/busco \
+      -P work_dir:/absolute/path/to/run/work \
+      -P run_name:MyRun \
+      --output-dir /absolute/path/to/run/notebooks/
+
+  Example for Buniformis:
+
+  conda run -n quarto quarto render \
+      /Users/timrozday/Documents/subspecies-phylogeny/notebooks/stage1_busco.qmd \
+      -P busco_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/01_explore/qc/busco \
+      -P work_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/work \
+      -P run_name:Buniformis \
+      --output-dir /Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/notebooks/
+
+Note on busco_dir vs work_dir:
+  Future pipeline runs publish short_summary.*.txt files directly into busco_dir.
+  For runs before the publishDir fix, set work_dir to the Nextflow work/ directory;
+  the notebook will locate the most recent successful short_summary per sample there.
+-->
+
+```{python}
+#| tags: [parameters]
+#| include: false
+busco_dir   = "../results/01_explore/qc/busco"
+work_dir    = ""
+run_name    = "pipeline run"
+nj_tree_nwk = ""
+```
+
+```{python}
+#| include: false
+import re
+import warnings
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+from IPython.display import display, HTML, Markdown
+import toytree
+
+warnings.filterwarnings('ignore')
+
+busco_dir    = Path(busco_dir)
+work_dir_p   = Path(work_dir) if work_dir and str(work_dir).strip() else None
+run_name     = str(run_name)
+
+PLOTLY_LAYOUT = dict(template='plotly_white', font=dict(family='Arial, sans-serif', size=13))
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def parse_short_summary(path: Path) -> dict:
+    """Parse a BUSCO short_summary_*.txt file into a dict of metrics."""
+    text = path.read_text()
+    def _int(pattern):
+        m = re.search(pattern, text)
+        return int(m.group(1)) if m else 0
+    def _str(pattern):
+        m = re.search(pattern, text)
+        return m.group(1) if m else ''
+
+    total = _int(r'(\d+)\s+Total BUSCO groups searched')
+    c = _int(r'(\d+)\s+Complete BUSCOs \(C\)')
+    s = _int(r'(\d+)\s+Complete and single-copy BUSCOs \(S\)')
+    d = _int(r'(\d+)\s+Complete and duplicated BUSCOs \(D\)')
+    f = _int(r'(\d+)\s+Fragmented BUSCOs \(F\)')
+    m = _int(r'(\d+)\s+Missing BUSCOs \(M\)')
+
+    n_scaffolds = _int(r'(\d+)\s+Number of scaffolds')
+    n_contigs   = _int(r'(\d+)\s+Number of contigs')
+    total_len   = _int(r'(\d+)\s+Total length')
+    n50_scaff   = _int(r'(\d+)\s+Scaffold N50')
+
+    lineage = _str(r'The lineage dataset is:\s+(\S+)')
+
+    return dict(
+        lineage=lineage, n=total,
+        C=round(100*c/total, 1) if total else 0,
+        S=round(100*s/total, 1) if total else 0,
+        D=round(100*d/total, 1) if total else 0,
+        F=round(100*f/total, 1) if total else 0,
+        M=round(100*m/total, 1) if total else 0,
+        n_complete=c, n_single=s, n_dup=d, n_frag=f, n_missing=m,
+        n_scaffolds=n_scaffolds, n_contigs=n_contigs,
+        total_length=total_len, n50=n50_scaff,
+    )
+
+
+def sample_from_fname(fname: str) -> tuple[str, str, str]:
+    """
+    Parse short_summary.{type}.{lineage}.{sample}-busco.txt
+    Returns (sample, stype, lineage).
+    """
+    # Strip leading 'short_summary.' and trailing '.txt'
+    stem = fname
+    if stem.startswith('short_summary.'):
+        stem = stem[len('short_summary.'):]
+    if stem.endswith('.txt'):
+        stem = stem[:-4]
+    # stem: {type}.{lineage}.{sample}-busco
+    parts = stem.split('.', 2)   # max 2 splits → [type, lineage, rest]
+    if len(parts) < 3:
+        return '', '', ''
+    stype   = parts[0]
+    lineage = parts[1]
+    sample  = parts[2].replace('-busco', '')
+    return sample, stype, lineage
+
+
+# ── locate files ─────────────────────────────────────────────────────────────
+# Prefer published busco_dir; fall back to work_dir for runs before the
+# publishDir fix.
+
+# (sample, stype) → {path, lineage}
+_found: dict[tuple[str,str], dict] = {}
+
+# 1. Published location: busco_dir/{sample}/short_summary.*.txt
+if busco_dir.exists():
+    for sample_dir in sorted(busco_dir.iterdir()):
+        if not sample_dir.is_dir():
+            continue
+        for f in sorted(sample_dir.glob('short_summary.*.txt')):
+            sample, stype, lineage = sample_from_fname(f.name)
+            if sample:
+                _found[(sample, stype)] = dict(path=f, lineage=lineage)
+
+# 2. Work directory fallback: keep only the most recent file per (sample, stype)
+if not _found and work_dir_p and work_dir_p.exists():
+    _best: dict[tuple[str,str], tuple[float, Path, str]] = {}
+    for f in work_dir_p.rglob('short_summary.*.txt'):
+        sample, stype, lineage = sample_from_fname(f.name)
+        if not sample:
+            continue
+        mtime = f.stat().st_mtime
+        key = (sample, stype)
+        if key not in _best or mtime > _best[key][0]:
+            _best[key] = (mtime, f, lineage)
+    for (sample, stype), (_, path, lineage) in _best.items():
+        _found[(sample, stype)] = dict(path=path, lineage=lineage)
+
+# ── build DataFrame ───────────────────────────────────────────────────────────
+rows = []
+for (sample, stype), info in sorted(_found.items()):
+    try:
+        d = parse_short_summary(info['path'])
+        rows.append(dict(sample=sample, type=stype, **d))
+    except Exception:
+        pass
+
+busco_df = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+# Separate specific (auto-selected lineage) and generic (bacteria_odb10)
+specific_df = busco_df[busco_df['type'] == 'specific'].copy() if not busco_df.empty else pd.DataFrame()
+generic_df  = busco_df[busco_df['type'] == 'generic'].copy()  if not busco_df.empty else pd.DataFrame()
+
+# ── NJ tree order (optional) ──────────────────────────────────────────────────
+leaf_order = []
+_nwk = str(nj_tree_nwk).strip()
+if _nwk:
+    _nwk_p = Path(_nwk)
+    if _nwk_p.exists():
+        try:
+            leaf_order = toytree.tree(str(_nwk_p)).ladderize().get_tip_labels()
+        except Exception:
+            leaf_order = []
+
+def sample_order(samples):
+    """Order samples by NJ tree if available, otherwise alphabetically."""
+    if leaf_order:
+        ordered = [s for s in leaf_order if s in set(samples)]
+        ordered += sorted(s for s in samples if s not in set(leaf_order))
+        return ordered
+    return sorted(samples)
+```
+
+## Run parameters {.unnumbered}
+
+```{python}
+#| echo: false
+n_samples = specific_df['sample'].nunique() if not specific_df.empty else 0
+lineages  = specific_df['lineage'].value_counts() if not specific_df.empty else pd.Series()
+top_lineage = lineages.index[0] if len(lineages) > 0 else '—'
+
+display(Markdown(f"""
+| Parameter | Value |
+|-----------|-------|
+| Run name | `{run_name}` |
+| BUSCO results directory | `{busco_dir.resolve()}` |
+| Samples found | {n_samples} |
+| Auto-selected lineage(s) | {', '.join(f'`{l}` ({c})' for l, c in lineages.items()) if len(lineages) else '—'} |
+"""))
+
+if busco_df.empty:
+    display(HTML(
+        '<div class="callout callout-style-default callout-warning callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        '<div class="callout-title-container flex-fill">No BUSCO results found</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'<p>No <code>short_summary.*.txt</code> files were found under '
+        f'<code>{busco_dir.resolve()}</code>.'
+        '<br>If this is a run before the BUSCO publishDir fix, re-render with '
+        '<code>-P work_dir:/path/to/run/work</code> to read from the Nextflow work directory.</p>'
+        '</div></div>'
+    ))
+```
+
+---
+
+## 1. Recommended lineage for HPC runs
+
+::: {.callout-tip}
+**Key question:** which single lineage should be pre-downloaded for HPC runs without internet?
+:::
+
+```{python}
+#| echo: false
+if not specific_df.empty:
+    top_n     = int(lineages.iloc[0]) if len(lineages) else 0
+    top_pct   = round(100 * top_n / n_samples, 1) if n_samples else 0
+    mean_comp = specific_df[specific_df['lineage'] == top_lineage]['C'].mean()
+    mean_miss = specific_df[specific_df['lineage'] == top_lineage]['M'].mean()
+
+    display(HTML(
+        f'<div class="callout callout-style-default callout-note callout-titled">'
+        f'<div class="callout-header"><div class="callout-icon-container">'
+        f'<i class="callout-icon"></i></div>'
+        f'<div class="callout-title-container flex-fill">Recommended lineage: '
+        f'<code>{top_lineage}</code></div></div>'
+        f'<div class="callout-body-container callout-body">'
+        f'<p>Selected by <strong>{top_pct:.0f}% of samples</strong> ({top_n}/{n_samples}) '
+        f'during auto-lineage detection.<br>'
+        f'Mean completeness: <strong>{mean_comp:.1f}%</strong> &nbsp;|&nbsp; '
+        f'Mean missing: <strong>{mean_miss:.1f}%</strong></p>'
+        f'<p><strong>Download the lineage database:</strong></p>'
+        f'<pre><code>busco --download {top_lineage} --download_path /path/to/busco_downloads/\n'
+        f'# Then pass to the pipeline:\n'
+        f'#   busco_lineage_db: /path/to/busco_downloads\n'
+        f'#   busco_lineage: {top_lineage}</code></pre>'
+        f'</div></div>'
+    ))
+```
+
+### 1.1 Lineage selected per sample
+
+```{python}
+#| echo: false
+if not specific_df.empty:
+    lc = specific_df['lineage'].value_counts().reset_index()
+    lc.columns = ['Lineage', 'Count']
+    lc['Pct'] = (100 * lc['Count'] / n_samples).round(1)
+
+    fig_lc = go.Figure(go.Bar(
+        x=lc['Lineage'], y=lc['Count'],
+        text=[f'{p} %' for p in lc['Pct']],
+        textposition='outside',
+        marker_color='steelblue',
+        hovertemplate='%{x}<br>%{y} samples (%{text})<extra></extra>',
+    ))
+    fig_lc.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'BUSCO auto-selected lineage — {run_name}',
+        xaxis_title='Lineage',
+        yaxis=dict(title='Number of samples', rangemode='tozero'),
+        height=380,
+    )
+    fig_lc.show()
+```
+
+---
+
+## 2. Completeness across samples
+
+Results for the auto-selected (specific) lineage. Each bar shows one sample; colours indicate the BUSCO category.
+
+```{python}
+#| echo: false
+if not specific_df.empty:
+    _ord = sample_order(specific_df['sample'].tolist())
+    _re  = specific_df.set_index('sample').reindex(_ord)
+
+    fig_comp = go.Figure()
+    palette = {'S': '#2196f3', 'D': '#ff9800', 'F': '#ffc107', 'M': '#e53935'}
+    labels  = {'S': 'Single-copy (S)', 'D': 'Duplicated (D)',
+                'F': 'Fragmented (F)', 'M': 'Missing (M)'}
+    for col in ('S', 'D', 'F', 'M'):
+        fig_comp.add_trace(go.Bar(
+            name=labels[col],
+            x=[f'<b>{s}</b>' if s == top_lineage else s for s in _ord],
+            y=_re[col].tolist(),
+            marker_color=palette[col],
+            hovertemplate=f'%{{x}}<br>{labels[col]}: %{{y:.1f}}%<extra></extra>',
+        ))
+    fig_comp.update_layout(
+        **PLOTLY_LAYOUT,
+        barmode='stack',
+        title=f'BUSCO completeness ({top_lineage}) — {run_name}',
+        xaxis=dict(tickangle=-45, tickfont=dict(size=9)),
+        yaxis=dict(title='%', range=[0, 105]),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02),
+        height=max(480, n_samples * 10 + 200),
+    )
+    fig_comp.show()
+
+    # Summary stats
+    _stats = specific_df[['C','S','D','F','M']].describe().loc[['mean','min','max']].round(1)
+    _stats.index = ['Mean', 'Min', 'Max']
+    display(Markdown('**Summary (all samples):**'))
+    display(_stats.to_html(classes='table table-sm table-hover'))
+```
+
+### 2.1 Completeness distribution
+
+```{python}
+#| echo: false
+if not specific_df.empty:
+    fig_box = go.Figure()
+    for col, lbl, clr in [('C','Complete','#2196f3'), ('M','Missing','#e53935'),
+                           ('D','Duplicated','#ff9800'), ('F','Fragmented','#ffc107')]:
+        fig_box.add_trace(go.Box(
+            y=specific_df[col].tolist(), name=lbl, marker_color=clr,
+            boxpoints='all', jitter=0.3, pointpos=0,
+            marker=dict(size=4, opacity=0.6),
+            hovertemplate='%{text}<br>' + lbl + ': %{y:.1f}%<extra></extra>',
+            text=specific_df['sample'].tolist(),
+        ))
+    fig_box.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'BUSCO metric distributions — {run_name}',
+        yaxis=dict(title='%', range=[-2, 105]),
+        height=420,
+    )
+    fig_box.show()
+```
+
+---
+
+## 3. Specific vs generic (bacteria_odb10) lineage
+
+The auto-lineage run also scores each genome against the broad `bacteria_odb10` lineage
+(124 universal markers) to enable comparisons across distantly related datasets.
+The specific lineage (`{top_lineage}`) uses more markers (541) targeted at the order,
+giving a more sensitive assessment.
+
+```{python}
+#| echo: false
+if not specific_df.empty and not generic_df.empty:
+    _merged = specific_df[['sample','C','M','n','lineage']].rename(
+        columns={'C':'C_specific','M':'M_specific','n':'n_specific','lineage':'lineage_specific'}
+    ).merge(
+        generic_df[['sample','C','M','n']].rename(
+            columns={'C':'C_generic','M':'M_generic','n':'n_generic'}
+        ),
+        on='sample', how='inner'
+    )
+
+    fig_vs = go.Figure()
+    fig_vs.add_trace(go.Scatter(
+        x=_merged['C_generic'], y=_merged['C_specific'],
+        mode='markers',
+        marker=dict(size=9, color='steelblue', opacity=0.75,
+                    line=dict(width=1, color='white')),
+        text=_merged['sample'],
+        hovertemplate='<b>%{text}</b><br>'
+                      'Generic (bacteria): %{x:.1f}%<br>'
+                      f'Specific ({top_lineage}): %{{y:.1f}}%'
+                      '<extra></extra>',
+    ))
+    # Diagonal reference line
+    fig_vs.add_shape(type='line', x0=0, y0=0, x1=105, y1=105,
+                     line=dict(color='grey', dash='dot', width=1))
+    fig_vs.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Completeness: specific vs generic lineage — {run_name}',
+        xaxis=dict(title='bacteria_odb10 completeness (%)', range=[0, 105]),
+        yaxis=dict(title=f'{top_lineage} completeness (%)', range=[0, 105]),
+        height=480,
+    )
+    fig_vs.show()
+
+    display(Markdown(
+        f'Points above the diagonal indicate that the specific lineage '
+        f'(`{top_lineage}`) detects higher completeness than the generic '
+        f'`bacteria_odb10` lineage — expected for well-characterised orders.'
+    ))
+elif not generic_df.empty:
+    display(Markdown('> Generic lineage results not available.'))
+```
+
+---
+
+## 4. Assembly statistics
+
+BUSCO reports basic assembly statistics alongside the completeness scores.
+Samples with unusually high contig counts or low genome lengths may indicate
+assembly fragmentation that could affect phylogenetic analysis.
+
+```{python}
+#| echo: false
+if not specific_df.empty:
+    _ord = sample_order(specific_df['sample'].tolist())
+    _re  = specific_df.set_index('sample').reindex(_ord)
+
+    # Genome length bar
+    _mean_len = _re['total_length'].mean()
+    _clrs = ['#d62728' if v < _mean_len * 0.8 or v > _mean_len * 1.2
+             else '#1f77b4' for v in _re['total_length']]
+    fig_len = go.Figure(go.Bar(
+        x=_re['total_length'].tolist(),
+        y=_ord, orientation='h',
+        marker_color=_clrs,
+        hovertemplate='%{y}<br>Length: %{x:,} bp<extra></extra>',
+    ))
+    fig_len.add_vline(x=_mean_len,
+                      line=dict(color='orange', dash='dash', width=1.5),
+                      annotation_text=f'mean {_mean_len/1e6:.1f} Mbp',
+                      annotation_position='top right')
+    fig_len.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Genome length — {run_name}',
+        xaxis=dict(title='Total length (bp)', tickformat=','),
+        yaxis=dict(tickfont=dict(size=9),
+                   categoryorder='array', categoryarray=list(reversed(_ord))),
+        height=max(450, n_samples * 14 + 100),
+        margin=dict(l=185),
+    )
+    fig_len.show()
+
+    # Contig count bar
+    _med_c = _re['n_contigs'].median()
+    _clrs_c = ['#d62728' if v > _med_c * 3 else '#1f77b4' for v in _re['n_contigs']]
+    fig_ctg = go.Figure(go.Bar(
+        x=_re['n_contigs'].tolist(),
+        y=_ord, orientation='h',
+        marker_color=_clrs_c,
+        hovertemplate='%{y}<br>Contigs: %{x}<extra></extra>',
+    ))
+    fig_ctg.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f'Contig count — {run_name} (red = > 3× median)',
+        xaxis_title='Number of contigs',
+        yaxis=dict(tickfont=dict(size=9),
+                   categoryorder='array', categoryarray=list(reversed(_ord))),
+        height=max(450, n_samples * 14 + 100),
+        margin=dict(l=185),
+    )
+    fig_ctg.show()
+```
+
+---
+
+## 5. Full results table
+
+```{python}
+#| echo: false
+if not specific_df.empty:
+    _tbl = specific_df[['sample','lineage','n','C','S','D','F','M',
+                         'n_scaffolds','total_length','n50']].copy()
+    _tbl = _tbl.rename(columns={
+        'lineage':'Lineage','n':'Total BUSCOs',
+        'C':'C (%)','S':'S (%)','D':'D (%)','F':'F (%)','M':'M (%)',
+        'n_scaffolds':'Scaffolds','total_length':'Length (bp)','n50':'N50 (bp)',
+    })
+
+    # Colour rows where completeness < 95% or missing > 5%
+    def _row_style(row):
+        flag = row['C (%)'] < 95 or row['M (%)'] > 5
+        bg = 'background:#fff3cd' if flag else ''
+        return [bg] * len(row)
+
+    _html = (_tbl.style
+             .apply(_row_style, axis=1)
+             .format({'Length (bp)': '{:,}', 'N50 (bp)': '{:,}',
+                      'C (%)': '{:.1f}', 'S (%)': '{:.1f}',
+                      'D (%)': '{:.1f}', 'F (%)': '{:.1f}', 'M (%)': '{:.1f}'})
+             .set_table_attributes('class="table table-sm table-hover"')
+             .to_html())
+    display(HTML(_html))
+    display(Markdown('*Amber rows: completeness < 95 % or missing > 5 %.*'))
+```

@@ -11,9 +11,7 @@ format:
     fig-responsive: true
 jupyter: basicpython
 params:
-  build_dir: "../results/01_explore"
-  explore_dir: "../results/01_explore"
-  qc_dir: ""
+  results_dir: "../results/01_explore"
   run_name: "pipeline run"
   highlights_file: ""
 ---
@@ -23,8 +21,7 @@ Render command (use absolute paths — Quarto resolves paths relative to the not
 
   conda run -n quarto quarto render \
       /path/to/subspecies-phylogeny/notebooks/stage1_explore.qmd \
-      -P build_dir:/absolute/path/to/run/results/01_explore \
-      -P explore_dir:/absolute/path/to/run/results/01_explore \
+      -P results_dir:/absolute/path/to/run/results/01_explore \
       -P run_name:Buniformis \
       --output-dir /absolute/path/to/run/notebooks/
 
@@ -32,9 +29,7 @@ Render command (use absolute paths — Quarto resolves paths relative to the not
 
   conda run -n quarto quarto render \
       /Users/timrozday/Documents/subspecies-phylogeny/notebooks/stage1_explore.qmd \
-      -P build_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/01_explore \
-      -P explore_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/01_explore \
-      -P qc_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/00_qc \
+      -P results_dir:/Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/results/01_explore \
       -P run_name:Buniformis \
       --output-dir /Users/timrozday/Documents/subspecies-phylogeny_runs/Buniformis/notebooks/
 
@@ -50,9 +45,7 @@ Static image export for Plotly figures (PNG/SVG) requires kaleido:
 #| tags: [parameters]
 #| include: false
 # Default parameter values — overridden by -P flags at render time
-build_dir       = "../results/01_explore"
-explore_dir     = "../results/01_explore"
-qc_dir          = ""
+results_dir     = "../results/01_explore"
 run_name        = "pipeline run"
 highlights_file = ""
 ```
@@ -87,10 +80,12 @@ import io
 warnings.filterwarnings('ignore')
 
 # Convert injected param strings to Path objects
-build_dir   = Path(build_dir)
-explore_dir = Path(explore_dir)
-qc_dir_path = Path(qc_dir) if qc_dir and str(qc_dir).strip() else None
+results_dir = Path(results_dir)
 run_name    = str(run_name)
+# Aliases used throughout — all three now point to the same directory
+build_dir   = results_dir
+explore_dir = results_dir
+qc_dir_path = results_dir
 
 # ---- Highlights config -----------------------------------------------
 _DEFAULT_PALETTE = ['#e63946', '#f4a261', '#2a9d8f', '#8338ec', '#fb8500']
@@ -155,33 +150,41 @@ PLOTLY_LAYOUT = dict(
 # ============================================================
 
 # --- FastANI -------------------------------------------------------
-fastani_path = build_dir / "fastani" / "fastani.txt"
-fastani_df = pd.read_csv(
-    fastani_path, sep='\t',
-    names=['query', 'ref', 'ani', 'mapped_kmers', 'total_kmers']
-)
-# Strip .fa suffix added by FastANI from genome filenames
-for col in ('query', 'ref'):
-    fastani_df[col] = fastani_df[col].str.replace(r'\.fa(sta)?$', '', regex=True)
-
-samples = sorted(fastani_df['query'].unique())
-n_samples = len(samples)
-
-# Build symmetric ANI matrix (fill missing pairs with NaN)
-ani_matrix = fastani_df.pivot_table(index='query', columns='ref',
-                                    values='ani', aggfunc='first')
-# Ensure symmetry: fill any missing (i,j) with (j,i)
-for s in samples:
-    for t in samples:
-        if pd.isna(ani_matrix.loc[s, t]) and not pd.isna(ani_matrix.loc[t, s]):
-            ani_matrix.loc[s, t] = ani_matrix.loc[t, s]
-ani_matrix = ani_matrix.reindex(index=samples, columns=samples)
+fastani_path = results_dir / "fastani" / "fastani.txt"
+if fastani_path.exists():
+    fastani_df = pd.read_csv(
+        fastani_path, sep='\t',
+        names=['query', 'ref', 'ani', 'mapped_kmers', 'total_kmers']
+    )
+    # Strip .fa suffix added by FastANI from genome filenames
+    for col in ('query', 'ref'):
+        fastani_df[col] = fastani_df[col].str.replace(r'\.fa(sta)?$', '', regex=True)
+    samples = sorted(fastani_df['query'].unique())
+    n_samples = len(samples)
+    # Build symmetric ANI matrix (fill missing pairs with NaN)
+    ani_matrix = fastani_df.pivot_table(index='query', columns='ref',
+                                        values='ani', aggfunc='first')
+    # Ensure symmetry: fill any missing (i,j) with (j,i)
+    for s in samples:
+        for t in samples:
+            if pd.isna(ani_matrix.loc[s, t]) and not pd.isna(ani_matrix.loc[t, s]):
+                ani_matrix.loc[s, t] = ani_matrix.loc[t, s]
+    ani_matrix = ani_matrix.reindex(index=samples, columns=samples)
+else:
+    fastani_df = pd.DataFrame(columns=['query', 'ref', 'ani', 'mapped_kmers', 'total_kmers'])
+    samples    = []
+    n_samples  = 0
+    ani_matrix = pd.DataFrame()
 
 # --- NJ tree from FastANI ------------------------------------------
-nwk_path = build_dir / "nj_tree" / "fastani_nj.nwk"
-tt = toytree.tree(str(nwk_path))
-tt = tt.ladderize()
-leaf_order = tt.get_tip_labels()
+nwk_path = results_dir / "nj_tree" / "fastani_nj.nwk"
+if nwk_path.exists():
+    tt = toytree.tree(str(nwk_path))
+    tt = tt.ladderize()
+    leaf_order = tt.get_tip_labels()
+else:
+    tt         = None
+    leaf_order = []
 
 # --- Alignment lengths per min_freq --------------------------------
 align_rows = []
@@ -267,7 +270,7 @@ for mf_dir in sorted(explore_dir.glob("gubbins/min_freq_*"),
 
 available_gubbins_mf = sorted(gubbins_data.keys())
 
-# --- Stage 0 genome QC (optional — only when qc_dir is supplied) -----------
+# --- Stage 0 genome QC (loaded from results_dir/qc/ if present) -----------
 def _read_qc_tool(qc_subdir, glob_pattern, read_fn):
     """Glob per-sample directories, read one file each, concatenate."""
     rows = []
@@ -359,16 +362,15 @@ qc_summary_df = pd.concat(_qc_parts, axis=1).reset_index().rename(columns={'inde
 # --- Reference genome (SELECT_REFERENCE medoid) ----------------------
 # Try the published reference.fa; fall back to the highest-mean-ANI sample.
 ref_name = None
-_ref_fa = build_dir / "ska2" / "map" / "reference.fa"
+_ref_fa = results_dir / "ska2" / "map" / "reference.fa"
 if _ref_fa.exists():
     with open(_ref_fa) as _fh:
         _hdr = _fh.readline().strip().lstrip('>')
     ref_name = re.sub(r'\.fa(sta)?$', '', _hdr.split()[0])
-else:
+elif not ani_matrix.empty:
     _diag = ani_matrix.copy().astype(float)
     np.fill_diagonal(_diag.values, np.nan)
-    if not _diag.empty:
-        ref_name = _diag.mean(axis=1).idxmax()
+    ref_name = _diag.mean(axis=1).idxmax()
 
 # --- Detailed GFF parsing (recombination block coordinates) ----------
 gubbins_gff = {}   # mf -> DataFrame[sample, start, end, length, snp_count, node]
@@ -473,15 +475,14 @@ def draw_toytree(tt, title=None, tip_font_size='10px', width=900):
 
 ```{python}
 #| echo: false
-from IPython.display import display, Markdown
+from IPython.display import display, Markdown, HTML
 
 _ref_display = f"`{ref_name}`" if ref_name else "_not found_"
 display(Markdown(f"""
 | Parameter | Value |
 |-----------|-------|
 | Run name | `{run_name}` |
-| Build results | `{build_dir.resolve()}` |
-| Explore results | `{explore_dir.resolve()}` |
+| Results directory | `{results_dir.resolve()}` |
 | Samples | {n_samples} |
 | **ska map reference (medoid)** | **{_ref_display}** |
 | Min-freq values tested | {sorted(stats_df['min_freq'].tolist())} |
@@ -500,9 +501,8 @@ if len(align_rows) == 0:
         '<div class="callout-title-container flex-fill">No alignment data found</div></div>'
         '<div class="callout-body-container callout-body">'
         f'<p>No <code>alignment.fasta</code> files were found under '
-        f'<code>{explore_dir.resolve()}/ska2/min_freq_*/</code>. '
-        'Check that <code>explore_dir</code> points to the correct stage-2 results directory '
-        'and that the pipeline ran to completion.</p>'
+        f'<code>{results_dir.resolve()}/ska2/min_freq_*/</code>. '
+        'The pipeline may not have produced alignment output yet.</p>'
         '</div></div>'
     ))
 ```
@@ -514,29 +514,19 @@ if len(align_rows) == 0:
 ```{python}
 #| echo: false
 from IPython.display import HTML
-if qc_dir_path and qc_dir_path.exists() and not qc_summary_df.empty:
+if not qc_summary_df.empty:
     display(Markdown(f"QC results loaded from `{qc_dir_path.resolve()}` "
                      f"({len(qc_summary_df)} genomes)."))
-elif qc_dir_path:
-    display(HTML(
-        '<div class="callout callout-style-default callout-warning callout-titled">'
-        '<div class="callout-header"><div class="callout-icon-container">'
-        '<i class="callout-icon"></i></div>'
-        '<div class="callout-title-container flex-fill">QC directory not found</div></div>'
-        '<div class="callout-body-container callout-body">'
-        f'<p><code>{qc_dir_path}</code> does not exist. '
-        'Re-render with <code>-P qc_dir:/path/to/results/00_qc</code> to populate this section.</p>'
-        '</div></div>'
-    ))
 else:
     display(HTML(
         '<div class="callout callout-style-default callout-note callout-titled">'
         '<div class="callout-header"><div class="callout-icon-container">'
         '<i class="callout-icon"></i></div>'
-        '<div class="callout-title-container flex-fill">No QC results supplied</div></div>'
+        '<div class="callout-title-container flex-fill">No QC results found</div></div>'
         '<div class="callout-body-container callout-body">'
-        '<p>Pass <code>-P qc_dir:/path/to/results/00_qc</code> to include stage 0 '
-        'genome quality metrics in this report.</p>'
+        f'<p>No QC output (CheckM2, GUNC, QUAST, MAGpurify) found under '
+        f'<code>{qc_dir_path.resolve()}/qc/</code>. '
+        'This section will populate once stage 0 QC has run.</p>'
         '</div></div>'
     ))
 ```
@@ -800,34 +790,40 @@ all others) is labelled **★** in the tree below and highlighted in the heatmap
 #| echo: false
 from IPython.display import HTML
 
-# Temporarily add the reference to highlights so draw_toytree colours it distinctly
-_ref_in_highlights = ref_name and ref_name not in highlights
-if _ref_in_highlights:
-    highlights[ref_name] = {'label': ref_name, 'color': '#d62728'}
+if tt is None:
+    display(HTML(
+        '<div class="callout callout-style-default callout-note callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        '<div class="callout-title-container flex-fill">FastANI not yet available</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'<p>No FastANI NJ tree found at <code>{nwk_path}</code>. '
+        'This section will populate once the pipeline has completed stage 1.</p>'
+        '</div></div>'
+    ))
+else:
+    # Temporarily add the reference to highlights so draw_toytree colours it distinctly
+    _ref_in_highlights = ref_name and ref_name not in highlights
+    if _ref_in_highlights:
+        highlights[ref_name] = {'label': ref_name, 'color': '#d62728'}
 
-canvas, html_str, svg_str = draw_toytree(
-    tt, title=f"FastANI NJ tree — {run_name}"
-)
-
-# Restore highlights so downstream plots are not affected
-if _ref_in_highlights:
-    del highlights[ref_name]
-
-# Inject a ★ label into the SVG/HTML next to the reference tip
-if ref_name:
-    html_str = html_str.replace(
-        f'>{ref_name}<',
-        f'>★ {ref_name}<',
-    )
-    svg_str = svg_str.replace(
-        f'>{ref_name}<',
-        f'>★ {ref_name}<',
+    canvas, html_str, svg_str = draw_toytree(
+        tt, title=f"FastANI NJ tree — {run_name}"
     )
 
-(figs_dir / "fastani_nj_tree.svg").write_text(svg_str)
-(figs_dir / "fastani_nj_tree.html").write_text(html_str)
+    # Restore highlights so downstream plots are not affected
+    if _ref_in_highlights:
+        del highlights[ref_name]
 
-display(HTML(html_str))
+    # Inject a ★ label into the SVG/HTML next to the reference tip
+    if ref_name:
+        html_str = html_str.replace(f'>{ref_name}<', f'>★ {ref_name}<')
+        svg_str  = svg_str.replace( f'>{ref_name}<', f'>★ {ref_name}<')
+
+    (figs_dir / "fastani_nj_tree.svg").write_text(svg_str)
+    (figs_dir / "fastani_nj_tree.html").write_text(html_str)
+
+    display(HTML(html_str))
 ```
 
 ### 1.2 Pairwise ANI heatmap (ordered by tree)
@@ -837,91 +833,97 @@ samples appear as blocks along the diagonal.
 
 ```{python}
 #| echo: false
-# Reorder matrix by tree leaf order (only keep leaves present in matrix)
-ordered = [s for s in leaf_order if s in ani_matrix.index]
-mat = ani_matrix.reindex(index=ordered, columns=ordered)
+if ani_matrix.empty:
+    display(HTML('<p><em>FastANI data not available — heatmap will appear once the pipeline has run.</em></p>'))
+else:
+    # Reorder matrix by tree leaf order (only keep leaves present in matrix)
+    ordered = [s for s in leaf_order if s in ani_matrix.index]
+    mat = ani_matrix.reindex(index=ordered, columns=ordered)
 
-ani_min = np.nanmin(mat.values[mat.values < 100])  # exclude self-comparisons
-ani_min = max(ani_min - 0.5, 90)                   # clamp floor
+    ani_min = np.nanmin(mat.values[mat.values < 100])  # exclude self-comparisons
+    ani_min = max(ani_min - 0.5, 90)                   # clamp floor
 
-ticktext = [f"<b>{s}</b>" if s in highlights else s for s in mat.index.tolist()]
+    ticktext = [f"<b>{s}</b>" if s in highlights else s for s in mat.index.tolist()]
 
-fig_heat = go.Figure(data=go.Heatmap(
-    z=mat.values,
-    x=mat.columns.tolist(),
-    y=mat.index.tolist(),
-    colorscale='Blues',
-    zmin=ani_min,
-    zmax=100,
-    colorbar=dict(title='ANI (%)'),
-    hovertemplate=(
-        'Query: %{y}<br>'
-        'Reference: %{x}<br>'
-        'ANI: %{z:.4f}%'
-        '<extra></extra>'
-    ),
-))
-fig_heat.update_layout(
-    **PLOTLY_LAYOUT,
-    title=f"Pairwise FastANI — {run_name}",
-    xaxis=dict(tickfont=dict(size=8), tickangle=-45,
-               ticktext=ticktext, tickvals=mat.columns.tolist()),
-    yaxis=dict(tickfont=dict(size=8), autorange='reversed',
-               ticktext=ticktext, tickvals=mat.index.tolist()),
-    height=max(600, n_samples * 13),
-    width=max(650, n_samples * 13),
-    margin=dict(l=160, b=160),
-)
-save_fig(fig_heat, "fastani_heatmap")
-fig_heat.show()
+    fig_heat = go.Figure(data=go.Heatmap(
+        z=mat.values,
+        x=mat.columns.tolist(),
+        y=mat.index.tolist(),
+        colorscale='Blues',
+        zmin=ani_min,
+        zmax=100,
+        colorbar=dict(title='ANI (%)'),
+        hovertemplate=(
+            'Query: %{y}<br>'
+            'Reference: %{x}<br>'
+            'ANI: %{z:.4f}%'
+            '<extra></extra>'
+        ),
+    ))
+    fig_heat.update_layout(
+        **PLOTLY_LAYOUT,
+        title=f"Pairwise FastANI — {run_name}",
+        xaxis=dict(tickfont=dict(size=8), tickangle=-45,
+                   ticktext=ticktext, tickvals=mat.columns.tolist()),
+        yaxis=dict(tickfont=dict(size=8), autorange='reversed',
+                   ticktext=ticktext, tickvals=mat.index.tolist()),
+        height=max(600, n_samples * 13),
+        width=max(650, n_samples * 13),
+        margin=dict(l=160, b=160),
+    )
+    save_fig(fig_heat, "fastani_heatmap")
+    fig_heat.show()
 ```
 
 ### 1.3 ANI summary statistics
 
 ```{python}
 #| echo: false
-# Off-diagonal only
-mask = np.ones(mat.shape, dtype=bool)
-np.fill_diagonal(mask, False)
-off_diag = mat.values[mask]
-off_diag = off_diag[~np.isnan(off_diag)]
+if ani_matrix.empty:
+    display(HTML('<p><em>FastANI data not available — statistics will appear once the pipeline has run.</em></p>'))
+else:
+    # Off-diagonal only
+    mask = np.ones(mat.shape, dtype=bool)
+    np.fill_diagonal(mask, False)
+    off_diag = mat.values[mask]
+    off_diag = off_diag[~np.isnan(off_diag)]
 
-ani_stats = pd.DataFrame({
-    'Statistic': ['Min ANI (%)', 'Mean ANI (%)', 'Median ANI (%)',
-                  'Max ANI (%)', 'Std dev (%)'],
-    'Value': [
-        f"{off_diag.min():.4f}",
-        f"{off_diag.mean():.4f}",
-        f"{np.median(off_diag):.4f}",
-        f"{off_diag.max():.4f}",
-        f"{off_diag.std():.4f}",
-    ]
-})
-# Per-sample mean ANI against all others
-per_sample = mat.copy()
-np.fill_diagonal(per_sample.values, np.nan)
-sample_mean_ani = per_sample.mean(axis=1).sort_values(ascending=True)
-sample_ani_df = sample_mean_ani.reset_index()
-sample_ani_df.columns = ['Sample', 'Mean ANI (%) vs others']
-sample_ani_df['Mean ANI (%) vs others'] = sample_ani_df['Mean ANI (%) vs others'].round(4)
+    ani_stats = pd.DataFrame({
+        'Statistic': ['Min ANI (%)', 'Mean ANI (%)', 'Median ANI (%)',
+                      'Max ANI (%)', 'Std dev (%)'],
+        'Value': [
+            f"{off_diag.min():.4f}",
+            f"{off_diag.mean():.4f}",
+            f"{np.median(off_diag):.4f}",
+            f"{off_diag.max():.4f}",
+            f"{off_diag.std():.4f}",
+        ]
+    })
+    # Per-sample mean ANI against all others
+    per_sample = mat.copy()
+    np.fill_diagonal(per_sample.values, np.nan)
+    sample_mean_ani = per_sample.mean(axis=1).sort_values(ascending=True)
+    sample_ani_df = sample_mean_ani.reset_index()
+    sample_ani_df.columns = ['Sample', 'Mean ANI (%) vs others']
+    sample_ani_df['Mean ANI (%) vs others'] = sample_ani_df['Mean ANI (%) vs others'].round(4)
 
-ani_stats.to_csv(tables_dir / "fastani_summary_stats.csv", index=False)
-sample_ani_df.to_csv(tables_dir / "fastani_per_sample_mean_ani.csv", index=False)
+    ani_stats.to_csv(tables_dir / "fastani_summary_stats.csv", index=False)
+    sample_ani_df.to_csv(tables_dir / "fastani_per_sample_mean_ani.csv", index=False)
 
-display(Markdown("**Summary statistics (all pairwise, self excluded):**"))
-display(ani_stats.to_html(index=False, classes='table table-sm table-hover'))
-display(Markdown(""))
-display(Markdown("**Per-sample mean ANI against all others** (lowest first — potential outliers at top). "
-                 "★ = selected as `ska map` reference (FastANI medoid):"))
+    display(Markdown("**Summary statistics (all pairwise, self excluded):**"))
+    display(ani_stats.to_html(index=False, classes='table table-sm table-hover'))
+    display(Markdown(""))
+    display(Markdown("**Per-sample mean ANI against all others** (lowest first — potential outliers at top). "
+                     "★ = selected as `ska map` reference (FastANI medoid):"))
 
-# Bold the reference row in the rendered table
-_html_table = sample_ani_df.head(20).to_html(index=False, classes='table table-sm table-hover')
-if ref_name:
-    _html_table = _html_table.replace(
-        f'<td>{ref_name}</td>',
-        f'<td><strong>★ {ref_name}</strong></td>',
-    )
-display(HTML(_html_table))
+    # Bold the reference row in the rendered table
+    _html_table = sample_ani_df.head(20).to_html(index=False, classes='table table-sm table-hover')
+    if ref_name:
+        _html_table = _html_table.replace(
+            f'<td>{ref_name}</td>',
+            f'<td><strong>★ {ref_name}</strong></td>',
+        )
+    display(HTML(_html_table))
 ```
 
 ---
@@ -1492,20 +1494,21 @@ def _rf_dist(tt1, tt2):
     return (_raw / _den if _den else 0.0), _raw, len(_bp1), len(_bp2)
 
 rf_rows = []
-for _mf in sorted(gubbins_data.keys()):
-    _gub_dir   = explore_dir / f"gubbins/min_freq_{_mf}"
-    _tre_files = [f for f in _gub_dir.glob("*.final_tree.tre")
-                  if 'node_labelled' not in f.name]
-    if not _tre_files:
-        continue
-    try:
-        _tt_g = toytree.tree(str(_tre_files[0])).ladderize()
-        _norm, _raw, _nb1, _nb2 = _rf_dist(tt, _tt_g)
-        rf_rows.append({'min_freq': _mf, 'rf_norm': round(_norm, 4),
-                        'rf_raw': _raw, 'n_bips_fastani': _nb1,
-                        'n_bips_gubbins': _nb2})
-    except Exception:
-        pass
+if tt is not None:
+    for _mf in sorted(gubbins_data.keys()):
+        _gub_dir   = explore_dir / f"gubbins/min_freq_{_mf}"
+        _tre_files = [f for f in _gub_dir.glob("*.final_tree.tre")
+                      if 'node_labelled' not in f.name]
+        if not _tre_files:
+            continue
+        try:
+            _tt_g = toytree.tree(str(_tre_files[0])).ladderize()
+            _norm, _raw, _nb1, _nb2 = _rf_dist(tt, _tt_g)
+            rf_rows.append({'min_freq': _mf, 'rf_norm': round(_norm, 4),
+                            'rf_raw': _raw, 'n_bips_fastani': _nb1,
+                            'n_bips_gubbins': _nb2})
+        except Exception:
+            pass
 rf_df = pd.DataFrame(rf_rows)
 ```
 
