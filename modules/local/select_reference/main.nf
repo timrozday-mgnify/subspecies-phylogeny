@@ -30,6 +30,9 @@ process SELECT_REFERENCE {
     ani_sums   = defaultdict(float)
     ani_counts = defaultdict(int)
 
+    # Only score genomes that were staged (i.e. passed the trusted filter upstream).
+    available = set(os.listdir("fastas"))
+
     with open("${ani_tsv}") as fh:
         for line in fh:
             parts = line.strip().split("\\t")
@@ -37,7 +40,7 @@ process SELECT_REFERENCE {
                 continue
             q = os.path.basename(parts[0])
             r = os.path.basename(parts[1])
-            if q == r:
+            if q == r or q not in available:
                 continue
             ani_sums[q]   += float(parts[2])
             ani_counts[q] += 1

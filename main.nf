@@ -14,8 +14,9 @@ workflow {
             .fromPath(params.input, checkIfExists: true)
             .splitCsv(header: true)
             .map { row ->
-                def meta  = [ id: row.sample ]
-                def fasta = (row.fasta.startsWith('/') || row.fasta =~ /^[a-z]+:\/\//)
+                def trusted = row.containsKey('trusted') ? (row.trusted?.toLowerCase() in ['true', 'yes', '1']) : false
+                def meta    = [ id: row.sample, trusted: trusted ]
+                def fasta   = (row.fasta.startsWith('/') || row.fasta =~ /^[a-z]+:\/\//)
                     ? file(row.fasta, checkIfExists: true)
                     : file("${workflow.projectDir}/${row.fasta}", checkIfExists: true)
                 [ meta, fasta ]

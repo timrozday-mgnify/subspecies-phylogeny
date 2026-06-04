@@ -92,9 +92,15 @@ workflow SUBSPECIES_PHYLOGENY {
         ch_nj_fastani = NJ_TREE_FASTANI.out.tree
 
         // Select the FastANI medoid as the ska map reference (unless overridden below).
+        // When --ska_map_ref_trusted_only is set, only genomes marked trusted=true in
+        // the samplesheet are eligible; otherwise all input genomes are candidates.
+        def ch_ref_fastas = params.ska_map_ref_trusted_only
+            ? ch_input.filter { meta, fasta -> meta.trusted }.map { meta, fasta -> fasta }.collect()
+            : ch_input.map { meta, fasta -> fasta }.collect()
+
         SELECT_REFERENCE(
             FASTANI_ALLVSALL.out.ani,
-            ch_input.map { meta, fasta -> fasta }.collect()
+            ch_ref_fastas
         )
         ch_versions      = ch_versions.mix(SELECT_REFERENCE.out.versions)
         ch_map_reference = SELECT_REFERENCE.out.reference

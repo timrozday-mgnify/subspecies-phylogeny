@@ -187,6 +187,8 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 | `--ska_distance` | `false` | Run `ska distance` to produce a pairwise SNP distance table and NJ tree |
 | `--ska_lo` | `false` | Run `ska lo` to identify SNPs and INDELs left out of the split-kmer graph (proxy for ambiguous regions) |
 | `--ska_lo_reference` | `null` | Optional reference FASTA to anchor `ska lo` coordinates |
+| `--ska_map_reference` | `null` | Explicit reference FASTA for `ska map` (Gubbins track). When set, overrides auto-selection of the FastANI medoid |
+| `--ska_map_ref_trusted_only` | `false` | When `true`, only genomes marked `trusted=true` in the samplesheet are candidates for auto-selection of the `ska map` reference. Has no effect when `--ska_map_reference` is set |
 | `--skip_qc` | `false` | Skip the entire genome QC section (QUAST, MAGpurify, CheckM2, CheckM, GUNC, BUSCO) |
 | `--checkm2_db` | `null` | Path to CheckM2 DIAMOND database file (`.dmnd`). CheckM2 only runs when this is set |
 | `--checkm_db` | `null` | Path to CheckM v1 database root directory. CheckM only runs when this is set |
@@ -376,17 +378,18 @@ process {
 
 ## Samplesheet format
 
-A CSV file with at minimum two columns: `sample` and `fasta`.
+A CSV file with at minimum two columns: `sample` and `fasta`. An optional `trusted` column controls which genomes are eligible for auto-selection as the `ska map` reference.
 
 ```csv
-sample,fasta
-isolate_A,/path/to/isolate_A.fasta
-isolate_B,/path/to/isolate_B.fasta
-isolate_C,/path/to/isolate_C.fasta
+sample,fasta,trusted
+isolate_A,/path/to/isolate_A.fasta,true
+isolate_B,/path/to/isolate_B.fasta,false
+isolate_C,/path/to/isolate_C.fasta,true
 ```
 
 - `sample` — used as the output label in per-sample files (e.g. `.skf` filenames).
 - `fasta` — absolute path or path relative to the project directory. HTTP/FTP URLs are also accepted.
+- `trusted` *(optional)* — `true`/`false` (also accepts `yes`/`no` or `1`/`0`). Marks the genome as a trusted, high-quality assembly. When `--ska_map_ref_trusted_only true` is set, only trusted genomes are candidates for auto-selection of the `ska map` reference. Defaults to `false` if the column is absent.
 
 **Note:** the sample name stored inside the merged SKF (and used by `ska delete`) is derived from the **FASTA filename basename** (without extension), which may differ from the `sample` column. For example, `sample=BU_61` with `fasta=BU_61_NT5381.1.fa` will store the name `BU_61_NT5381.1` in the SKF. Run `ska nk merged.skf` to list the stored sample names.
 
