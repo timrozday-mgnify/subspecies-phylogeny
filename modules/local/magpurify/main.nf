@@ -42,15 +42,19 @@ process MAGPURIFY {
     printf 'try:\\n    import Bio.SeqUtils\\n    if not hasattr(Bio.SeqUtils, \"GC\"):\\n        Bio.SeqUtils.GC = Bio.SeqUtils.gc_fraction\\nexcept ImportError:\\n    pass\\n' \\
         > /tmp/py_patch/sitecustomize.py
 
-    PYTHONPATH="/tmp/py_patch:\${PYTHONPATH:-}" \\
-        magpurify gc-content ${fasta} ${prefix}_magpurify ${args}
+    # Replace ambiguous/non-ACGT bases with A so tetra-freq does not crash on
+    # k-mers absent from its ACGT-only dictionary (e.g. KeyError: 'NTCG').
+    awk '/^>/{print; next} {gsub(/[^ACGTacgt]/, "A"); print}' ${fasta} > magpurify_input.fa
 
     PYTHONPATH="/tmp/py_patch:\${PYTHONPATH:-}" \\
-        magpurify tetra-freq ${fasta} ${prefix}_magpurify ${args}
+        magpurify gc-content magpurify_input.fa ${prefix}_magpurify ${args}
+
+    PYTHONPATH="/tmp/py_patch:\${PYTHONPATH:-}" \\
+        magpurify tetra-freq magpurify_input.fa ${prefix}_magpurify ${args}
 
     if [ "${run_phylo}" = "true" ]; then
         PYTHONPATH="/tmp/py_patch:\${PYTHONPATH:-}" \\
-            magpurify phylo-markers --db ${db} ${fasta} ${prefix}_magpurify ${args}
+            magpurify phylo-markers --db ${db} magpurify_input.fa ${prefix}_magpurify ${args}
     fi
 
     cat <<-END_VERSIONS > versions.yml
