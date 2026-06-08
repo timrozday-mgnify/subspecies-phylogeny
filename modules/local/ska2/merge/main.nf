@@ -19,10 +19,12 @@ process SKA2_MERGE {
     script:
     def args = task.ext.args ?: ''
     """
+    printf '%s\n' ${skf_files} > skf_filelist.txt
+
     ska merge \\
         $args \\
         -o merged \\
-        ${skf_files}
+        --file-list skf_filelist.txt
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
