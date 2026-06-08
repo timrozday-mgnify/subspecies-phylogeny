@@ -17,11 +17,11 @@
         "content": [
             {
                 "versions": [
-                    "versions.yml:md5,9169e885bdee04c116c9193a7be7a6aa"
+                    "versions.yml:md5,636b23c8516c1a5fc7bb98561d2098a2"
                 ]
             }
         ],
-        "timestamp": "2026-05-27T14:14:08.536856",
+        "timestamp": "2026-06-08T21:02:00.605652",
         "meta": {
             "nf-test": "0.9.4",
             "nextflow": "26.04.1"
