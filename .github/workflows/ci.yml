@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch on new push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  pre-commit:
+    name: Pre-commit checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Nextflow is needed for the nextflow-syntax local hook
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: latest-stable
+
+      - uses: pre-commit/action@v3.0.1
+
+  nf-test:
+    name: nf-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: latest-stable
+
+      - name: Install nf-test
+        run: |
+          curl -fsSL https://get.nf-test.com | bash
+          sudo mv nf-test /usr/local/bin/
+          nf-test --version
+
+      # Module-level tests (ska2, select_reference, magpurify, …)
+      - name: Run module tests
+        run: nf-test test modules/ --ci --junitxml=module-test-results.xml
+
+      # Pipeline-level stub tests (fast, no real tool execution)
+      - name: Run pipeline stub tests
+        run: >
+          nf-test test tests/default.nf.test --ci
+          --filter "stub"
+          --junitxml=stub-test-results.xml
+
+      # Full pipeline test with real Docker containers
+      - name: Run full pipeline test
+        run: >
+          nf-test test tests/default.nf.test --ci
+          --filter "three B. uniformis genomes$"
+          --junitxml=full-test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-results
+          path: "*-test-results.xml"

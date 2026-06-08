@@ -2,3 +2,13 @@
 .nf-test/
 .nf-test*
 CLAUDE.md
+
+# Generated notebook test outputs (fixture data in tests/notebooks/results/ is committed;
+# the rendered HTML and figures written there by `task test:notebooks` are not)
+tests/notebooks/notebooks/
+tests/notebooks/results/**/figs/
+tests/notebooks/results/**/tables/
+
+# Nextflow work and results directories
+work/
+results/

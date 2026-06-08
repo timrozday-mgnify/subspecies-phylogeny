@@ -1,0 +1,27 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(skf|snap|hmm|hmm\.\w+|patch)$'
+      - id: end-of-file-fixer
+        exclude: '\.(skf|snap|hmm|hmm\.\w+|patch)$'
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # 5 MB ceiling — test FASTAs are ~4.5 MB; blocks accidental HTML/binary blobs
+        args: ['--maxkb=5000']
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+        exclude: '\.(skf|snap|hmm|hmm\.\w+|patch)$'
+
+  # Nextflow DSL parse — requires nextflow on PATH
+  - repo: local
+    hooks:
+      - id: nextflow-syntax
+        name: Nextflow pipeline syntax
+        entry: nextflow run main.nf --help
+        language: system
+        files: '\.(nf|config)$'
+        pass_filenames: false

@@ -1,0 +1,93 @@
+version: '3'
+# Requires Go Task >= 3.21  https://taskfile.dev
+
+vars:
+  QUARTO_ENV: quarto
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Report rendering
+  # Pass variables on the command line:
+  #   task report:stage1 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun
+  #   task report:stage2 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun MIN_FREQ=0.95
+  #   task report:all    RUN_DIR=/abs/path/to/run RUN_NAME=MyRun
+  # RUN_DIR must be absolute (Quarto resolves -P paths relative to the .qmd file).
+  # ---------------------------------------------------------------------------
+
+  report:stage1:
+    desc: "Render stage1_explore.html for a pipeline run (RUN_DIR, RUN_NAME required)"
+    requires:
+      vars: [RUN_DIR, RUN_NAME]
+    cmds:
+      - mkdir -p "{{.RUN_DIR}}/notebooks"
+      - |
+        conda run -n {{.QUARTO_ENV}} quarto render \
+          "{{.TASKFILE_DIR}}/notebooks/stage1_explore.qmd" \
+          -P results_dir:"{{.RUN_DIR}}/results/01_explore" \
+          -P run_name:"{{.RUN_NAME}}" \
+          --output-dir "{{.RUN_DIR}}/notebooks/"
+
+  report:stage2:
+    desc: "Render stage2_build.html for a pipeline run (RUN_DIR, RUN_NAME required; MIN_FREQ default 0.95)"
+    requires:
+      vars: [RUN_DIR, RUN_NAME]
+    vars:
+      MIN_FREQ: '{{.MIN_FREQ | default "0.95"}}'
+    cmds:
+      - mkdir -p "{{.RUN_DIR}}/notebooks"
+      - |
+        conda run -n {{.QUARTO_ENV}} quarto render \
+          "{{.TASKFILE_DIR}}/notebooks/stage2_build.qmd" \
+          -P explore_dir:"{{.RUN_DIR}}/results/01_explore" \
+          -P build_dir:"{{.RUN_DIR}}/results/02_build" \
+          -P run_name:"{{.RUN_NAME}}" \
+          -P min_freq:"{{.MIN_FREQ}}" \
+          --output-dir "{{.RUN_DIR}}/notebooks/"
+
+  report:busco:
+    desc: "Render stage1_busco.html for a pipeline run (RUN_DIR, RUN_NAME required)"
+    requires:
+      vars: [RUN_DIR, RUN_NAME]
+    cmds:
+      - mkdir -p "{{.RUN_DIR}}/notebooks"
+      - |
+        conda run -n {{.QUARTO_ENV}} quarto render \
+          "{{.TASKFILE_DIR}}/notebooks/stage1_busco.qmd" \
+          -P busco_dir:"{{.RUN_DIR}}/results/01_explore/qc/busco" \
+          -P run_name:"{{.RUN_NAME}}" \
+          --output-dir "{{.RUN_DIR}}/notebooks/"
+
+  report:all:
+    desc: "Render stage1 and stage2 reports for a run (RUN_DIR, RUN_NAME required; MIN_FREQ default 0.95)"
+    requires:
+      vars: [RUN_DIR, RUN_NAME]
+    vars:
+      MIN_FREQ: '{{.MIN_FREQ | default "0.95"}}'
+    cmds:
+      - task: report:stage1
+        vars: {RUN_DIR: '{{.RUN_DIR}}', RUN_NAME: '{{.RUN_NAME}}'}
+      - task: report:stage2
+        vars: {RUN_DIR: '{{.RUN_DIR}}', RUN_NAME: '{{.RUN_NAME}}', MIN_FREQ: '{{.MIN_FREQ}}'}
+
+  # ---------------------------------------------------------------------------
+  # Tests
+  # ---------------------------------------------------------------------------
+
+  test:notebooks:
+    desc: Render stage1 and stage2 notebooks against fixture data in tests/notebooks/
+    vars:
+      FIXTURE: '{{.TASKFILE_DIR}}/tests/notebooks'
+    cmds:
+      - mkdir -p "{{.FIXTURE}}/notebooks"
+      - task: report:stage1
+        vars:
+          RUN_DIR: '{{.FIXTURE}}'
+          RUN_NAME: test
+      - task: report:stage2
+        vars:
+          RUN_DIR: '{{.FIXTURE}}'
+          RUN_NAME: test
+          MIN_FREQ: '0.9'
+      - sh -c 'test -s "{{.FIXTURE}}/notebooks/stage1_explore.html" && echo "stage1_explore OK"'
+      - sh -c 'test -s "{{.FIXTURE}}/notebooks/stage2_build.html"   && echo "stage2_build OK"'
