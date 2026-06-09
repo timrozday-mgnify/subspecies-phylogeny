@@ -1,0 +1,9 @@
+ipykernel>=6
+matplotlib>=3.8
+numpy>=1.26
+pandas>=2.1
+plotly>=5.18
+pyyaml>=6
+toytree>=3
+toyplot>=2
+pytest>=8

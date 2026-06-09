@@ -80,3 +80,32 @@ jobs:
         with:
           name: nf-test-results
           path: "*-test-results.xml"
+
+  test-notebooks:
+    name: Notebook tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r tests/notebooks/requirements.txt
+
+      - name: Register basicpython Jupyter kernel
+        run: python -m ipykernel install --user --name basicpython --display-name "basicpython"
+
+      - name: Install Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Run notebook tests
+        run: pytest tests/notebooks/test_notebooks.py -v --junitxml=notebook-test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebook-test-results
+          path: notebook-test-results.xml
