@@ -67,11 +67,11 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 16 tasks
-                { assert workflow.trace.succeeded().size() == 16 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 17 tasks
+                { assert workflow.trace.succeeded().size() == 17 }
             )
         }
     }
@@ -89,8 +89,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (16) + 1 SKA2_DELETE = 17 tasks
-                { assert workflow.trace.succeeded().size() == 17 }
+                // same as default stub (17) + 1 SKA2_DELETE = 18 tasks
+                { assert workflow.trace.succeeded().size() == 18 }
             )
         }
     }
@@ -108,8 +108,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default stub (16) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 18 tasks
-                { assert workflow.trace.succeeded().size() == 18 }
+                // default stub (17) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 19 tasks
+                { assert workflow.trace.succeeded().size() == 19 }
             )
         }
     }
@@ -127,8 +127,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (16) + 1 SKA2_LO = 17 tasks
-                { assert workflow.trace.succeeded().size() == 17 }
+                // same as default stub (17) + 1 SKA2_LO = 18 tasks
+                { assert workflow.trace.succeeded().size() == 18 }
             )
         }
     }
@@ -194,10 +194,10 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 9 tasks
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 10 tasks
                 // (skip_alignment disables the whole align + Gubbins track)
-                { assert workflow.trace.succeeded().size() == 9 }
+                { assert workflow.trace.succeeded().size() == 10 }
             )
         }
     }
@@ -215,11 +215,11 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 14 tasks
-                { assert workflow.trace.succeeded().size() == 14 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 15 tasks
+                { assert workflow.trace.succeeded().size() == 15 }
             )
         }
     }
@@ -237,12 +237,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 BUILD + 1 MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 7)
+                // 3 BUILD + 1 MERGE_BATCH + 1 MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 8)
                 // + 2 min_freq × (ALIGN + SNPSITES + WEED + MAP + GUBBINS) = 10
                 // + 2 min_freq × 2 gubbins tracks × IQTREE = 4
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
-                // = 7 + 10 + 4 + 2 = 23 tasks
-                { assert workflow.trace.succeeded().size() == 23 }
+                // = 8 + 10 + 4 + 2 = 24 tasks
+                { assert workflow.trace.succeeded().size() == 24 }
             )
         }
     }
@@ -260,8 +260,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (16 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 25 tasks
-                { assert workflow.trace.succeeded().size() == 25 }
+                // default (17 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 26 tasks
+                { assert workflow.trace.succeeded().size() == 26 }
             )
         }
     }
@@ -302,9 +302,9 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (16) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 28 tasks
+                // default (17) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 29 tasks
                 // (CheckM2 and CheckM require real databases with checksums/pplacer)
-                { assert workflow.trace.succeeded().size() == 28 }
+                { assert workflow.trace.succeeded().size() == 29 }
             )
         }
     }

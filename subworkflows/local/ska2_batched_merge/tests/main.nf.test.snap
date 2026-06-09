@@ -1,0 +1,32 @@
+{
+    "three Bacteroides uniformis genomes batch_size=2 [forces batching] - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,59145409dbc7098e878a68a3a821e97d",
+                    "versions.yml:md5,8d8631c01fa3121ef2a56d2951d2b258"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-09T07:41:29.51289",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "three Bacteroides uniformis genomes batch_size=2 [forces batching]": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,59145409dbc7098e878a68a3a821e97d",
+                    "versions.yml:md5,8d8631c01fa3121ef2a56d2951d2b258"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-09T07:41:24.652209",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

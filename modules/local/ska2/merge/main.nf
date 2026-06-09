@@ -7,7 +7,7 @@ process SKA2_MERGE {
         'quay.io/biocontainers/ska2:0.5.1--h4349ce8_0' }"
 
     input:
-    path(skf_files)
+    path(skf_files, stageAs: '?/*')
 
     output:
     path("merged.skf"),  emit: skf
@@ -19,8 +19,12 @@ process SKA2_MERGE {
     script:
     def args = task.ext.args ?: ''
     """
-    printf '%s\n' ${skf_files} > skf_filelist.txt
-    xargs -x -a skf_filelist.txt ska merge $args -o merged
+    printf '%s\\n' ${skf_files} > skf_filelist.txt
+    if [ "\$(wc -l < skf_filelist.txt)" -eq 1 ]; then
+        cp "\$(cat skf_filelist.txt)" merged.skf
+    else
+        xargs -x -a skf_filelist.txt ska merge $args -o merged
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
