@@ -43,10 +43,9 @@ jobs:
           version: latest-stable
 
       - name: Install nf-test
-        run: |
-          curl -fsSL https://github.com/askimed/nf-test/releases/download/v0.9.4/nf-test-0.9.4.tar.gz | tar -xz
-          sudo mv nf-test /usr/local/bin/
-          nf-test version
+        uses: nf-test/setup-nf-test@v1
+        with:
+          version: "0.9.4"
 
       # Module-level tests (ska2, select_reference, magpurify, …)
       - name: Run module tests
