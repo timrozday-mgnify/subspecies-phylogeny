@@ -190,6 +190,7 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 | `--ska_map_reference` | `null` | Explicit reference FASTA for `ska map` (Gubbins track). When set, overrides auto-selection of the FastANI medoid |
 | `--ska_map_ref_trusted_only` | `false` | When `true`, only genomes marked `trusted=true` in the samplesheet are candidates for auto-selection of the `ska map` reference. Has no effect when `--ska_map_reference` is set |
 | `--ska_merge_batch_size` | `100` | Number of per-sample SKF files merged per batch. Reduces peak memory by limiting how much split-kmer data is loaded simultaneously. Decrease for very large cohorts or if `ska merge` OOMs |
+| `--ska_merge_min_freq` | `0.0` | Pre-merge weed threshold (0 disables). When > 0, each batch SKF is weeded with `ska weed`, and the final merge accumulates the batches one at a time, weeding the running accumulator after each step with a threshold that tightens as it grows toward the full cohort. Both weeds are conservative (never remove a position that could meet the final cutoff). Keep ≤ the smallest `--ska_align_min_freq` value; setting it equal maximises memory savings |
 | `--skip_qc` | `false` | Skip the entire genome QC section (QUAST, MAGpurify, CheckM2, CheckM, GUNC, BUSCO) |
 | `--checkm2_db` | `null` | Path to CheckM2 DIAMOND database file (`.dmnd`). CheckM2 only runs when this is set |
 | `--checkm_db` | `null` | Path to CheckM v1 database root directory. CheckM only runs when this is set |

@@ -1,0 +1,30 @@
+{
+    "three Bacteroides uniformis genomes - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,6e8e45310bb531e81cda72c050338764"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-11T09:13:22.101998",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "three Bacteroides uniformis genomes total=3 batch_size=1 min_freq=0.9 [folds with weed]": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,6e8e45310bb531e81cda72c050338764"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-11T09:12:56.845897",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

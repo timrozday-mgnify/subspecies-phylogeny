@@ -18,7 +18,9 @@ process SKA2_WEED {
     task.ext.when == null || task.ext.when
 
     script:
-    def args = task.ext.args ?: ''
+    // ext.args overrides the dynamic default; otherwise fall back to the per-task
+    // min_freq carried on the meta map (e.g. the computed batch/branch threshold).
+    def args = task.ext.args ?: (meta.min_freq != null ? "--min-freq ${meta.min_freq}" : '')
     prefix   = task.ext.prefix ?: "weeded_${meta.id}"
     """
     ska weed \\

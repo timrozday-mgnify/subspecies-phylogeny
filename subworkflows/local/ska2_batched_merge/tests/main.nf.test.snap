@@ -1,14 +1,46 @@
 {
+    "three Bacteroides uniformis genomes batch_size=2 min_freq=0.9 - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,59145409dbc7098e878a68a3a821e97d",
+                    "versions.yml:md5,aa2058d27080f55c94de88eb9ebc3c99",
+                    "versions.yml:md5,c651e6e3664ea4ada06573cc000ca425"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-11T09:14:16.645395",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "three Bacteroides uniformis genomes batch_size=2 min_freq=0.9 [forces batching and weed]": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,59145409dbc7098e878a68a3a821e97d",
+                    "versions.yml:md5,aa2058d27080f55c94de88eb9ebc3c99",
+                    "versions.yml:md5,c651e6e3664ea4ada06573cc000ca425"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-11T09:14:07.186338",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
     "three Bacteroides uniformis genomes batch_size=2 [forces batching] - stub": {
         "content": [
             {
                 "versions": [
                     "versions.yml:md5,59145409dbc7098e878a68a3a821e97d",
-                    "versions.yml:md5,8d8631c01fa3121ef2a56d2951d2b258"
+                    "versions.yml:md5,aa2058d27080f55c94de88eb9ebc3c99"
                 ]
             }
         ],
-        "timestamp": "2026-06-09T07:41:29.51289",
+        "timestamp": "2026-06-11T09:14:11.565332",
         "meta": {
             "nf-test": "0.9.4",
             "nextflow": "26.04.1"
@@ -19,11 +51,11 @@
             {
                 "versions": [
                     "versions.yml:md5,59145409dbc7098e878a68a3a821e97d",
-                    "versions.yml:md5,8d8631c01fa3121ef2a56d2951d2b258"
+                    "versions.yml:md5,aa2058d27080f55c94de88eb9ebc3c99"
                 ]
             }
         ],
-        "timestamp": "2026-06-09T07:41:24.652209",
+        "timestamp": "2026-06-11T09:13:43.599577",
         "meta": {
             "nf-test": "0.9.4",
             "nextflow": "26.04.1"

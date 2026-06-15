@@ -67,7 +67,7 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
                 // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 17 tasks
@@ -194,7 +194,7 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 10 tasks
                 // (skip_alignment disables the whole align + Gubbins track)
                 { assert workflow.trace.succeeded().size() == 10 }
@@ -215,7 +215,7 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS
                 // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 15 tasks
@@ -237,7 +237,7 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 BUILD + 1 MERGE_BATCH + 1 MERGE_FINAL + 1 FASTANI + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 8)
+                // 3 BUILD + 1 MERGE_BATCH + 1 ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 8)
                 // + 2 min_freq × (ALIGN + SNPSITES + WEED + MAP + GUBBINS) = 10
                 // + 2 min_freq × 2 gubbins tracks × IQTREE = 4
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)

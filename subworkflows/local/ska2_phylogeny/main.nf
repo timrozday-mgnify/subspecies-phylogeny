@@ -16,7 +16,7 @@ workflow SKA2_PHYLOGENY {
     ch_skf = SKA2_BUILD.out.skf
         .map { meta, skf -> skf }
 
-    SKA2_BATCHED_MERGE(ch_skf, params.ska_merge_batch_size as Integer)
+    SKA2_BATCHED_MERGE(ch_skf, params.ska_merge_batch_size as Integer, params.ska_merge_min_freq as Double)
     ch_versions = ch_versions.mix(SKA2_BATCHED_MERGE.out.versions)
 
     emit:
