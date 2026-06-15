@@ -9,7 +9,9 @@ process SKA2_SHARD_SPLIT {
     tag "$meta.id"
     label 'process_low'
 
-    container 'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.0'
+    container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
+        'oras://ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.0-sif' :
+        'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.0' }"
 
     input:
     tuple val(meta), path(skf)
