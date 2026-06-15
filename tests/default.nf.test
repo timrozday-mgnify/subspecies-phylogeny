@@ -67,11 +67,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_WEED_BATCH + 1 SKA2_ACCUMULATING_MERGE
+                // + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 17 tasks
-                { assert workflow.trace.succeeded().size() == 17 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 18 tasks
+                { assert workflow.trace.succeeded().size() == 18 }
             )
         }
     }
@@ -89,8 +90,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (17) + 1 SKA2_DELETE = 18 tasks
-                { assert workflow.trace.succeeded().size() == 18 }
+                // same as default stub (18) + 1 SKA2_DELETE = 19 tasks
+                { assert workflow.trace.succeeded().size() == 19 }
             )
         }
     }
@@ -108,8 +109,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default stub (17) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 19 tasks
-                { assert workflow.trace.succeeded().size() == 19 }
+                // default stub (18) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 20 tasks
+                { assert workflow.trace.succeeded().size() == 20 }
             )
         }
     }
@@ -127,8 +128,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (17) + 1 SKA2_LO = 18 tasks
-                { assert workflow.trace.succeeded().size() == 18 }
+                // same as default stub (18) + 1 SKA2_LO = 19 tasks
+                { assert workflow.trace.succeeded().size() == 19 }
             )
         }
     }
@@ -215,11 +216,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_WEED_BATCH + 1 SKA2_ACCUMULATING_MERGE
+                // + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 15 tasks
-                { assert workflow.trace.succeeded().size() == 15 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 16 tasks
+                { assert workflow.trace.succeeded().size() == 16 }
             )
         }
     }
@@ -237,12 +239,13 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 BUILD + 1 MERGE_BATCH + 1 ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 8)
+                // 3 BUILD + 1 MERGE_BATCH + 1 WEED_BATCH + 1 ACCUMULATING_MERGE + 1 FASTANI
+                // + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 9)
                 // + 2 min_freq × (ALIGN + SNPSITES + WEED + MAP + GUBBINS) = 10
                 // + 2 min_freq × 2 gubbins tracks × IQTREE = 4
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
-                // = 8 + 10 + 4 + 2 = 24 tasks
-                { assert workflow.trace.succeeded().size() == 24 }
+                // = 9 + 10 + 4 + 2 = 25 tasks
+                { assert workflow.trace.succeeded().size() == 25 }
             )
         }
     }
@@ -260,8 +263,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (17 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 26 tasks
-                { assert workflow.trace.succeeded().size() == 26 }
+                // default (18 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 27 tasks
+                { assert workflow.trace.succeeded().size() == 27 }
             )
         }
     }
@@ -302,9 +305,9 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (17) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 29 tasks
+                // default (18) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 30 tasks
                 // (CheckM2 and CheckM require real databases with checksums/pplacer)
-                { assert workflow.trace.succeeded().size() == 29 }
+                { assert workflow.trace.succeeded().size() == 30 }
             )
         }
     }
