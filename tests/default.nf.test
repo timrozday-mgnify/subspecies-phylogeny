@@ -67,12 +67,13 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_WEED_BATCH + 1 SKA2_ACCUMULATING_MERGE
+                // ska_shard_count=4 (tests/nextflow.config); merge_min_freq=0.9 so shards are weeded:
+                // 3 SKA2_BUILD + 3 SKA2_SHARD_SPLIT + 4 SKA2_MERGE_SHARD + 4 SKA2_WEED_SHARD + 1 SKA2_SHARD_CONCAT
                 // + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 18 tasks
-                { assert workflow.trace.succeeded().size() == 18 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 27 tasks
+                { assert workflow.trace.succeeded().size() == 27 }
             )
         }
     }
@@ -90,8 +91,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (18) + 1 SKA2_DELETE = 19 tasks
-                { assert workflow.trace.succeeded().size() == 19 }
+                // same as default stub (27) + 1 SKA2_DELETE = 28 tasks
+                { assert workflow.trace.succeeded().size() == 28 }
             )
         }
     }
@@ -109,8 +110,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default stub (18) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 20 tasks
-                { assert workflow.trace.succeeded().size() == 20 }
+                // default stub (27) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 29 tasks
+                { assert workflow.trace.succeeded().size() == 29 }
             )
         }
     }
@@ -128,8 +129,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (18) + 1 SKA2_LO = 19 tasks
-                { assert workflow.trace.succeeded().size() == 19 }
+                // same as default stub (27) + 1 SKA2_LO = 28 tasks
+                { assert workflow.trace.succeeded().size() == 28 }
             )
         }
     }
@@ -195,10 +196,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_ACCUMULATING_MERGE + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 10 tasks
+                // skip_alignment ⇒ merge_min_freq stays 0, so shards are NOT weeded:
+                // 3 SKA2_BUILD + 3 SKA2_SHARD_SPLIT + 4 SKA2_MERGE_SHARD + 1 SKA2_SHARD_CONCAT
+                // + 1 FASTANI + 1 NJ_TREE_FASTANI
+                // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 16 tasks
                 // (skip_alignment disables the whole align + Gubbins track)
-                { assert workflow.trace.succeeded().size() == 10 }
+                { assert workflow.trace.succeeded().size() == 16 }
             )
         }
     }
@@ -216,12 +219,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 SKA2_BUILD + 1 SKA2_MERGE_BATCH + 1 SKA2_WEED_BATCH + 1 SKA2_ACCUMULATING_MERGE
+                // 3 SKA2_BUILD + 3 SKA2_SHARD_SPLIT + 4 SKA2_MERGE_SHARD + 4 SKA2_WEED_SHARD + 1 SKA2_SHARD_CONCAT
                 // + 1 FASTANI + 1 NJ_TREE_FASTANI
                 // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 16 tasks
-                { assert workflow.trace.succeeded().size() == 16 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 25 tasks
+                { assert workflow.trace.succeeded().size() == 25 }
             )
         }
     }
@@ -239,13 +242,14 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 3 BUILD + 1 MERGE_BATCH + 1 WEED_BATCH + 1 ACCUMULATING_MERGE + 1 FASTANI
-                // + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 9)
+                // merge_min_freq = min(0.5, 0.9) = 0.5 > 0, so shards are weeded:
+                // 3 BUILD + 3 SHARD_SPLIT + 4 MERGE_SHARD + 4 WEED_SHARD + 1 SHARD_CONCAT + 1 FASTANI
+                // + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 18)
                 // + 2 min_freq × (ALIGN + SNPSITES + WEED + MAP + GUBBINS) = 10
                 // + 2 min_freq × 2 gubbins tracks × IQTREE = 4
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
-                // = 9 + 10 + 4 + 2 = 25 tasks
-                { assert workflow.trace.succeeded().size() == 25 }
+                // = 18 + 10 + 4 + 2 = 34 tasks
+                { assert workflow.trace.succeeded().size() == 34 }
             )
         }
     }
@@ -263,8 +267,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (18 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 27 tasks
-                { assert workflow.trace.succeeded().size() == 27 }
+                // default (27 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 36 tasks
+                { assert workflow.trace.succeeded().size() == 36 }
             )
         }
     }
@@ -305,9 +309,9 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (18) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 30 tasks
+                // default (27) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 39 tasks
                 // (CheckM2 and CheckM require real databases with checksums/pplacer)
-                { assert workflow.trace.succeeded().size() == 30 }
+                { assert workflow.trace.succeeded().size() == 39 }
             )
         }
     }
