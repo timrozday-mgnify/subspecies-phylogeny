@@ -1,0 +1,74 @@
+nextflow_process {
+    name "Test Process SKA2_SHARD_CONCAT"
+    script "../main.nf"
+    process "SKA2_SHARD_CONCAT"
+
+    tag "modules"
+    tag "ska2"
+    tag "ska2/shard_concat"
+    tag "ska2/shard_split"
+    tag "ska2/build"
+
+    test("concatenate the bins of one split SKF") {
+        setup {
+            run("SKA2_BUILD") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_SHARD_SPLIT") {
+                script "../../shard_split/main.nf"
+                process {
+                    """
+                    input[0] = SKA2_BUILD.out.skf
+                    input[1] = 4
+                    input[2] = 9
+                    """
+                }
+            }
+        }
+        when {
+            process {
+                """
+                input[0] = SKA2_SHARD_SPLIT.out.bins.map { meta, files -> files }
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.skf.size() == 1 },
+                { assert path(process.out.skf.get(0)).exists() },
+                { assert path(process.out.skf.get(0)).size() > 0 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("concatenate two bins - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ file('bin1.skf'), file('bin2.skf') ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}

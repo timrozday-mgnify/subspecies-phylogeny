@@ -1,0 +1,68 @@
+{
+    "three Bacteroides uniformis genomes sharded into 4 bins min_freq=0.9 [exercises weed]": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,0521d1e2a2cafaf02b1a37c033317508",
+                    "versions.yml:md5,5fa465422ff1004168b68108411c6b91",
+                    "versions.yml:md5,826710021656b2133960940d7afb9dfe",
+                    "versions.yml:md5,cfd645172558326ff4b5ed7dd567c91c"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:32:06.081433",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "three Bacteroides uniformis genomes sharded into 4 bins min_freq=0.9 - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,0521d1e2a2cafaf02b1a37c033317508",
+                    "versions.yml:md5,5fa465422ff1004168b68108411c6b91",
+                    "versions.yml:md5,826710021656b2133960940d7afb9dfe",
+                    "versions.yml:md5,cfd645172558326ff4b5ed7dd567c91c"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:32:20.946709",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "three Bacteroides uniformis genomes sharded into 4 bins - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,0521d1e2a2cafaf02b1a37c033317508",
+                    "versions.yml:md5,5fa465422ff1004168b68108411c6b91",
+                    "versions.yml:md5,cfd645172558326ff4b5ed7dd567c91c"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:32:12.908103",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "three Bacteroides uniformis genomes sharded into 4 bins": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,0521d1e2a2cafaf02b1a37c033317508",
+                    "versions.yml:md5,5fa465422ff1004168b68108411c6b91",
+                    "versions.yml:md5,cfd645172558326ff4b5ed7dd567c91c"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:31:45.107866",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

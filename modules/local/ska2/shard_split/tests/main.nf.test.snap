@@ -1,0 +1,30 @@
+{
+    "split one Bacteroides uniformis SKF into 4 bins": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,9612d5a4fd808e57bc0de4d2bd4a4659"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:31:15.660868",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "split one Bacteroides uniformis SKF into 4 bins - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,9612d5a4fd808e57bc0de4d2bd4a4659"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:31:19.086395",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

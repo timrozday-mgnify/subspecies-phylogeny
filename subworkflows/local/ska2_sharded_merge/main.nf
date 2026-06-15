@@ -1,0 +1,67 @@
+// Minimizer-sharded merge subworkflow — a memory-bounded alternative to
+// SKA2_BATCHED_MERGE.
+//
+// Each per-sample SKF is split into n_shards bins by split-kmer minimizer
+// (SKA2_SHARD_SPLIT). Because split-kmer keys are canonical, the same k-mer goes
+// to the same bin in every sample, so each bin can be merged across samples
+// independently (SKA2_MERGE_SHARD) — every per-bin merge touches only ~1/n_shards
+// of the key space, bounding peak memory and running fully in parallel. The merged
+// bins are then concatenated back into one merged.skf (SKA2_SHARD_CONCAT).
+//
+// When min_freq > 0 each merged bin is weeded (SKA2_WEED_SHARD) before concat.
+// A merged bin already holds every sample's column for its k-mers, so weeding it
+// at the final min_freq is exact (not merely conservative) and matches the
+// downstream ska align / ska weed filter — consistent with the batched-merge
+// published output.
+include { SKA2_SHARD_SPLIT                      } from '../../../modules/local/ska2/shard_split/main'
+include { SKA2_MERGE        as SKA2_MERGE_SHARD } from '../../../modules/local/ska2/merge/main'
+include { SKA2_WEED         as SKA2_WEED_SHARD  } from '../../../modules/local/ska2/weed/main'
+include { SKA2_SHARD_CONCAT                     } from '../../../modules/local/ska2/shard_concat/main'
+
+workflow SKA2_SHARDED_MERGE {
+    take:
+    ch_skf         // channel: path(*.skf) — one per sample (bare path, like SKA2_BATCHED_MERGE)
+    n_shards       // val: int — number of minimizer bins
+    minimizer_len  // val: int — minimizer (l-mer) length, must be <= k-1
+    min_freq       // val: double — final weed threshold (0 = no weed)
+
+    main:
+    ch_versions = Channel.empty()
+
+    // Synthesise a per-sample id from the filename so shard outputs are distinct.
+    ch_split_in = ch_skf.map { skf -> [ [id: skf.baseName], skf ] }
+    SKA2_SHARD_SPLIT(ch_split_in, n_shards, minimizer_len)
+    ch_versions = ch_versions.mix(SKA2_SHARD_SPLIT.out.versions.first())
+
+    // Regroup shards by bin index across all samples (parse trailing `.<i>.skf`).
+    ch_bins = SKA2_SHARD_SPLIT.out.bins
+        .map { meta, files -> files }
+        .flatten()
+        .map { f -> [ (f.name =~ /\.(\d+)\.skf$/)[0][1] as Integer, f ] }
+        .groupTuple()
+
+    // Merge each bin across samples (~1/n_shards of the key space per task).
+    SKA2_MERGE_SHARD( ch_bins.map { idx, files -> files } )
+    ch_versions = ch_versions.mix(SKA2_MERGE_SHARD.out.versions.first())
+
+    if (min_freq > 0) {
+        ch_weed_in = SKA2_MERGE_SHARD.out.skf
+            .map { skf -> [ [id: 'shard', min_freq: min_freq], skf ] }
+
+        SKA2_WEED_SHARD(ch_weed_in)
+        ch_versions = ch_versions.mix(SKA2_WEED_SHARD.out.versions.first())
+
+        ch_for_concat = SKA2_WEED_SHARD.out.skf
+            .map { meta, skf -> skf }
+            .collect()
+    } else {
+        ch_for_concat = SKA2_MERGE_SHARD.out.skf.collect()
+    }
+
+    SKA2_SHARD_CONCAT(ch_for_concat)
+    ch_versions = ch_versions.mix(SKA2_SHARD_CONCAT.out.versions)
+
+    emit:
+    skf      = SKA2_SHARD_CONCAT.out.skf   // path(merged.skf) — same contract as SKA2_BATCHED_MERGE
+    versions = ch_versions
+}

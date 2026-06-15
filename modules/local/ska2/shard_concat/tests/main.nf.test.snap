@@ -1,0 +1,30 @@
+{
+    "concatenate the bins of one split SKF": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,d7b8916fc3d11fc24bc3853e14584f2c"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:31:01.994499",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "concatenate two bins - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,d7b8916fc3d11fc24bc3853e14584f2c"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-15T14:31:05.841825",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

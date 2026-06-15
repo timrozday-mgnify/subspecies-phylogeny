@@ -1,0 +1,186 @@
+nextflow_workflow {
+    name "Test Subworkflow SKA2_SHARDED_MERGE"
+    script "../main.nf"
+    workflow "SKA2_SHARDED_MERGE"
+
+    tag "subworkflows"
+    tag "ska2"
+    tag "ska2_sharded_merge"
+    tag "ska2/build"
+
+    test("three Bacteroides uniformis genomes sharded into 4 bins") {
+        setup {
+            run("SKA2_BUILD", alias: "BUILD_1") {
+                script "../../../../modules/local/ska2/build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_2") {
+                script "../../../../modules/local/ska2/build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_909' ],
+                        file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_3") {
+                script "../../../../modules/local/ska2/build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_AN67' ],
+                        file(params.test_data_base + 'BU_AN67_NT5182.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+        }
+        when {
+            workflow {
+                """
+                input[0] = BUILD_1.out.skf
+                    .mix(BUILD_2.out.skf)
+                    .mix(BUILD_3.out.skf)
+                    .map { meta, skf -> skf }
+                input[1] = 4
+                input[2] = 9
+                input[3] = 0.0
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.skf.size() == 1 },
+                { assert path(workflow.out.skf.get(0)).exists() },
+                { assert path(workflow.out.skf.get(0)).size() > 0 },
+                { assert snapshot(
+                    workflow.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("three Bacteroides uniformis genomes sharded into 4 bins min_freq=0.9 [exercises weed]") {
+        setup {
+            run("SKA2_BUILD", alias: "BUILD_1") {
+                script "../../../../modules/local/ska2/build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_2") {
+                script "../../../../modules/local/ska2/build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_909' ],
+                        file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_3") {
+                script "../../../../modules/local/ska2/build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_AN67' ],
+                        file(params.test_data_base + 'BU_AN67_NT5182.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+        }
+        when {
+            workflow {
+                """
+                input[0] = BUILD_1.out.skf
+                    .mix(BUILD_2.out.skf)
+                    .mix(BUILD_3.out.skf)
+                    .map { meta, skf -> skf }
+                input[1] = 4
+                input[2] = 9
+                input[3] = 0.9
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.skf.size() == 1 },
+                { assert path(workflow.out.skf.get(0)).exists() },
+                { assert path(workflow.out.skf.get(0)).size() > 0 },
+                { assert snapshot(
+                    workflow.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("three Bacteroides uniformis genomes sharded into 4 bins - stub") {
+        options "-stub"
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    file('stub1.skf'),
+                    file('stub2.skf'),
+                    file('stub3.skf')
+                )
+                input[1] = 4
+                input[2] = 9
+                input[3] = 0.0
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert snapshot(
+                    workflow.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("three Bacteroides uniformis genomes sharded into 4 bins min_freq=0.9 - stub") {
+        options "-stub"
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    file('stub1.skf'),
+                    file('stub2.skf'),
+                    file('stub3.skf')
+                )
+                input[1] = 4
+                input[2] = 9
+                input[3] = 0.9
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert snapshot(
+                    workflow.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}
