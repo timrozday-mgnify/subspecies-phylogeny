@@ -33,15 +33,25 @@ workflow SKA2_SHARDED_MERGE {
     SKA2_SHARD_SPLIT(ch_split_in, n_shards, minimizer_len)
     ch_versions = ch_versions.mix(SKA2_SHARD_SPLIT.out.versions.first())
 
-    // Regroup shards by bin index across all samples (parse trailing `.<i>.skf`).
+    // Regroup shards by bin index across all samples (parse trailing `.<i>.skf`),
+    // carrying the sample id alongside each shard file.
     ch_bins = SKA2_SHARD_SPLIT.out.bins
-        .map { meta, files -> files }
-        .flatten()
-        .map { f -> [ (f.name =~ /\.(\d+)\.skf$/)[0][1] as Integer, f ] }
+        .flatMap { meta, files ->
+            files.collect { f ->
+                def idx = (f.name =~ /\.(\d+)\.skf$/)[0][1] as Integer
+                tuple(idx, tuple(meta.id, f))
+            }
+        }
         .groupTuple()
+        // Sort each bin's files by sample id so EVERY bin is merged in the same
+        // sample order. groupTuple collects in nondeterministic arrival order, and
+        // `ska merge` writes its `names` columns in input order — without this, bins
+        // would get inconsistent sample orderings and SKA2_SHARD_CONCAT (which stacks
+        // their variant matrices column-for-column) would reject them.
+        .map { idx, pairs -> pairs.sort { it[0] }.collect { it[1] } }
 
     // Merge each bin across samples (~1/n_shards of the key space per task).
-    SKA2_MERGE_SHARD( ch_bins.map { idx, files -> files } )
+    SKA2_MERGE_SHARD( ch_bins )
     ch_versions = ch_versions.mix(SKA2_MERGE_SHARD.out.versions.first())
 
     if (min_freq > 0) {
