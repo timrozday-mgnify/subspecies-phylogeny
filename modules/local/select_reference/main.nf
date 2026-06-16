@@ -1,7 +1,8 @@
-// Select the most central (medoid) genome from a FastANI all-vs-all matrix.
-// The medoid is the genome with the highest mean ANI to all other samples;
-// it minimises gaps when used as the ska map reference and reduces misalignment
-// errors compared with a more distant reference.
+// Select the most central (medoid) genome from a ska2 pairwise SNP distance
+// matrix. The medoid is the genome with the lowest mean distance (the
+// `Mismatches (proportion)` column, matching the ska2 NJ tree) to all other
+// samples; it minimises gaps when used as the ska map reference and reduces
+// misalignment errors compared with a more distant reference.
 process SELECT_REFERENCE {
     label 'process_single'
 
@@ -11,7 +12,7 @@ process SELECT_REFERENCE {
         'quay.io/biocontainers/gubbins:3.4.3--py310h5140242_0' }"
 
     input:
-    path(ani_tsv)
+    path(distance_tsv)
     path(fastas, stageAs: 'fastas/*')
 
     output:
@@ -27,31 +28,44 @@ process SELECT_REFERENCE {
     import os, shutil
     from collections import defaultdict
 
-    ani_sums   = defaultdict(float)
-    ani_counts = defaultdict(int)
+    # Map ska sample name (FASTA basename sans extension) -> staged FASTA filename.
+    # Only staged FASTAs are candidates (i.e. those that passed the trusted filter
+    # upstream); medoid means are still taken over every sample in the matrix.
+    candidates = {}
+    for fn in os.listdir("fastas"):
+        candidates[os.path.splitext(fn)[0]] = fn
 
-    # Only score genomes that were staged (i.e. passed the trusted filter upstream).
-    available = set(os.listdir("fastas"))
+    dist_sums   = defaultdict(float)
+    dist_counts = defaultdict(int)
 
-    with open("${ani_tsv}") as fh:
+    with open("${distance_tsv}") as fh:
+        header = fh.readline().rstrip("\\n").split("\\t")
+        try:
+            di = header.index("Mismatches (proportion)")
+        except ValueError:
+            di = 3  # ska distance default column order
         for line in fh:
-            parts = line.strip().split("\\t")
-            if len(parts) < 3:
+            parts = line.rstrip("\\n").split("\\t")
+            if len(parts) <= di:
                 continue
-            q = os.path.basename(parts[0])
-            r = os.path.basename(parts[1])
-            if q == r or q not in available:
+            a, b = parts[0], parts[1]
+            try:
+                d = float(parts[di])
+            except ValueError:
                 continue
-            ani_sums[q]   += float(parts[2])
-            ani_counts[q] += 1
+            # Accumulate distance from each candidate to every other sample.
+            if a in candidates:
+                dist_sums[a] += d; dist_counts[a] += 1
+            if b in candidates:
+                dist_sums[b] += d; dist_counts[b] += 1
 
-    if not ani_sums:
-        # Single-sample or empty ANI file: pick the first available FASTA
-        fastas = sorted(os.listdir("fastas"))
-        shutil.copy(os.path.join("fastas", fastas[0]), "reference.fa")
+    if not dist_sums:
+        # Single-sample or empty distance file: pick the first available FASTA.
+        first = sorted(candidates.values())[0]
+        shutil.copy(os.path.join("fastas", first), "reference.fa")
     else:
-        best = max(ani_sums, key=lambda q: ani_sums[q] / ani_counts[q])
-        shutil.copy(os.path.join("fastas", best), "reference.fa")
+        best = min(dist_sums, key=lambda s: dist_sums[s] / dist_counts[s])
+        shutil.copy(os.path.join("fastas", candidates[best]), "reference.fa")
     PYEOF
 
     cat <<-END_VERSIONS > versions.yml

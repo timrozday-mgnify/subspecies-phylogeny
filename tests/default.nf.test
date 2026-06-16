@@ -7,14 +7,18 @@ nextflow_pipeline {
     test("three B. uniformis genomes") {
         when {
             params {
-                input    = "${projectDir}/tests/samplesheets/test.csv"
-                outdir   = "$outputDir"
-                skip_qc  = true
+                input       = "${projectDir}/tests/samplesheets/test.csv"
+                outdir      = "$outputDir"
+                skip_qc     = true
+                run_fastani = true   // exercise the optional FastANI QC outputs
             }
         }
         then {
             assertAll(
                 { assert workflow.success },
+
+                // ska map reference auto-selected as the ska2 SNP-distance medoid
+                { assert path("${params.outdir}/ska2/map/reference.fa").exists() },
 
                 // IQ-TREE produced trees for both gubbins tracks
                 { assert path("${params.outdir}/iqtree/no_gubbins/min_freq_0.9/tree.treefile").exists() },
@@ -67,13 +71,14 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // ska_shard_count=4 (tests/nextflow.config); merge_min_freq=0.9 so shards are weeded:
+                // ska_shard_count=4 (tests/nextflow.config); merge_min_freq=0.9 so shards are weeded.
+                // FastANI is off by default; the reference is the ska2-distance medoid.
                 // 3 SKA2_BUILD + 3 SKA2_SHARD_SPLIT + 4 SKA2_MERGE_SHARD + 4 SKA2_WEED_SHARD + 1 SKA2_SHARD_CONCAT
-                // + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
+                // + 1 SKA2_DISTANCE + 1 SELECT_REFERENCE
+                // + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 27 tasks
-                { assert workflow.trace.succeeded().size() == 27 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 26 tasks
+                { assert workflow.trace.succeeded().size() == 26 }
             )
         }
     }
@@ -91,8 +96,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (27) + 1 SKA2_DELETE = 28 tasks
-                { assert workflow.trace.succeeded().size() == 28 }
+                // same as default stub (26) + 1 SKA2_DELETE = 27 tasks
+                { assert workflow.trace.succeeded().size() == 27 }
             )
         }
     }
@@ -110,8 +115,9 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default stub (27) + 1 SKA2_DISTANCE + 1 NJ_TREE_SKA2 = 29 tasks
-                { assert workflow.trace.succeeded().size() == 29 }
+                // SKA2_DISTANCE already runs for the reference; --ska_distance only adds the NJ tree.
+                // default stub (26) + 1 NJ_TREE_SKA2 = 27 tasks
+                { assert workflow.trace.succeeded().size() == 27 }
             )
         }
     }
@@ -129,8 +135,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // same as default stub (27) + 1 SKA2_LO = 28 tasks
-                { assert workflow.trace.succeeded().size() == 28 }
+                // same as default stub (26) + 1 SKA2_LO = 27 tasks
+                { assert workflow.trace.succeeded().size() == 27 }
             )
         }
     }
@@ -139,11 +145,11 @@ nextflow_pipeline {
         options "-stub"
         when {
             params {
-                // No input samplesheet — build/merge, FastANI, NJ_TREE_FASTANI and
-                // SELECT_REFERENCE are all skipped. With no reference available, the
-                // Gubbins track (SKA2_MAP → GUBBINS + its IQTREE) is skipped too;
-                // SKA2_WEED still runs as it does not need a reference. A log.warn
-                // is emitted pointing the user to --ska_map_reference / --input.
+                // No input samplesheet — build/merge and SELECT_REFERENCE are skipped
+                // (SKA2_DISTANCE for the reference needs --input to emit a FASTA from).
+                // With no reference available, the Gubbins track (SKA2_MAP → GUBBINS +
+                // its IQTREE) is skipped too; SKA2_WEED still runs as it does not need a
+                // reference. A log.warn points the user to --ska_map_reference / --input.
                 ska_merged_skf = "${projectDir}/tests/data/dummy_merged.skf"
                 outdir         = "$outputDir"
             }
@@ -163,9 +169,9 @@ nextflow_pipeline {
         when {
             params {
                 // Genomes still supplied via --input: build/merge are skipped (merged
-                // SKF is reused), but FASTANI + SELECT_REFERENCE run to auto-select the
-                // medoid as the ska map reference, so the full Gubbins track runs.
-                // NJ_TREE_FASTANI is not run in merged-SKF mode.
+                // SKF is reused), but SKA2_DISTANCE + SELECT_REFERENCE run to auto-select
+                // the ska2-distance medoid as the ska map reference, so the full Gubbins
+                // track runs. FastANI is off by default.
                 ska_merged_skf = "${projectDir}/tests/data/dummy_merged.skf"
                 input          = "${projectDir}/tests/samplesheets/test.csv"
                 outdir         = "$outputDir"
@@ -175,7 +181,7 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // 1 FASTANI + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
+                // 1 SKA2_DISTANCE + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS + 2 IQTREE
                 // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 11 tasks
                 { assert workflow.trace.succeeded().size() == 11 }
@@ -196,12 +202,12 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // skip_alignment ⇒ merge_min_freq stays 0, so shards are NOT weeded:
+                // skip_alignment ⇒ merge_min_freq stays 0 (no weed) AND the Gubbins track
+                // is inactive, so no reference is selected (no SKA2_DISTANCE/SELECT_REFERENCE);
+                // FastANI is off by default:
                 // 3 SKA2_BUILD + 3 SKA2_SHARD_SPLIT + 4 SKA2_MERGE_SHARD + 1 SKA2_SHARD_CONCAT
-                // + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SELECT_REFERENCE + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 16 tasks
-                // (skip_alignment disables the whole align + Gubbins track)
-                { assert workflow.trace.succeeded().size() == 16 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 13 tasks
+                { assert workflow.trace.succeeded().size() == 13 }
             )
         }
     }
@@ -220,11 +226,11 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // 3 SKA2_BUILD + 3 SKA2_SHARD_SPLIT + 4 SKA2_MERGE_SHARD + 4 SKA2_WEED_SHARD + 1 SKA2_SHARD_CONCAT
-                // + 1 FASTANI + 1 NJ_TREE_FASTANI
-                // + 1 SELECT_REFERENCE + 1 SKA2_ALIGN + 1 SNPSITES
+                // + 1 SKA2_DISTANCE + 1 SELECT_REFERENCE
+                // + 1 SKA2_ALIGN + 1 SNPSITES
                 // + 1 SKA2_WEED + 1 SKA2_MAP + 1 GUBBINS
-                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 25 tasks
-                { assert workflow.trace.succeeded().size() == 25 }
+                // + 1 CUSTOM_DUMPSOFTWAREVERSIONS + 1 MULTIQC = 24 tasks
+                { assert workflow.trace.succeeded().size() == 24 }
             )
         }
     }
@@ -243,13 +249,13 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 // merge_min_freq = min(0.5, 0.9) = 0.5 > 0, so shards are weeded:
-                // 3 BUILD + 3 SHARD_SPLIT + 4 MERGE_SHARD + 4 WEED_SHARD + 1 SHARD_CONCAT + 1 FASTANI
-                // + 1 NJ_TREE_FASTANI + 1 SELECT_REFERENCE (= 18)
+                // 3 BUILD + 3 SHARD_SPLIT + 4 MERGE_SHARD + 4 WEED_SHARD + 1 SHARD_CONCAT
+                // + 1 SKA2_DISTANCE + 1 SELECT_REFERENCE (= 17)
                 // + 2 min_freq × (ALIGN + SNPSITES + WEED + MAP + GUBBINS) = 10
                 // + 2 min_freq × 2 gubbins tracks × IQTREE = 4
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
-                // = 18 + 10 + 4 + 2 = 34 tasks
-                { assert workflow.trace.succeeded().size() == 34 }
+                // = 17 + 10 + 4 + 2 = 33 tasks
+                { assert workflow.trace.succeeded().size() == 33 }
             )
         }
     }
@@ -267,8 +273,8 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (27 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 36 tasks
-                { assert workflow.trace.succeeded().size() == 36 }
+                // default (26 with skip_qc=true) + 3 QUAST + 3 MAGPURIFY + 3 BUSCO_BUSCO = 35 tasks
+                { assert workflow.trace.succeeded().size() == 35 }
             )
         }
     }
@@ -309,9 +315,9 @@ nextflow_pipeline {
         then {
             assertAll(
                 { assert workflow.success },
-                // default (27) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 39 tasks
+                // default (26) + 3 QUAST + 3 MAGPURIFY + 3 GUNC_RUN + 3 BUSCO_BUSCO = 38 tasks
                 // (CheckM2 and CheckM require real databases with checksums/pplacer)
-                { assert workflow.trace.succeeded().size() == 39 }
+                { assert workflow.trace.succeeded().size() == 38 }
             )
         }
     }

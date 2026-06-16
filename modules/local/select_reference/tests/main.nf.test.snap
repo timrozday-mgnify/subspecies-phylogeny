@@ -1,0 +1,30 @@
+{
+    "ska2 distance medoid - stub": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,4b4bbec10c35b5dc0d8367fb15d02ed0"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-16T11:31:59.719934",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
+    "ska2 distance medoid of three B. uniformis genomes": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,4b4bbec10c35b5dc0d8367fb15d02ed0"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-16T11:31:55.893005",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    }
+}

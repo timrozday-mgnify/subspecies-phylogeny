@@ -56,33 +56,83 @@ workflow SUBSPECIES_PHYLOGENY {
     ch_map_reference = Channel.empty()
 
     // The Gubbins track needs a reference for ska map. It is resolved in this
-    // order: (1) --ska_map_reference override, (2) the FastANI medoid of the
-    // input genomes. (2) requires the genomes themselves — a merged SKF cannot
-    // be fed to FastANI — so in --ska_merged_skf mode it only applies when the
-    // samplesheet is still supplied via --input.
+    // order: (1) --ska_map_reference override, (2) the ska2 SNP-distance medoid of
+    // the input genomes (lowest mean pairwise distance). (2) needs the input
+    // genomes themselves to emit a reference FASTA, so in --ska_merged_skf mode it
+    // only applies when the samplesheet is still supplied via --input.
     gubbins_track_active = !params.skip_gubbins && !params.skip_alignment
 
+    // -----------------------------------------------------------------------
+    // Obtain the merged SKF: reuse a pre-computed one, or run BUILD → MERGE.
+    // -----------------------------------------------------------------------
     if (params.ska_merged_skf) {
         ch_merged_skf = Channel.fromPath(params.ska_merged_skf, checkIfExists: true)
+    } else {
+        SKA2_PHYLOGENY(ch_input)
+        ch_versions   = ch_versions.mix(SKA2_PHYLOGENY.out.versions)
+        ch_merged_skf = SKA2_PHYLOGENY.out.merged_skf
+    }
 
-        // Auto-select the FastANI medoid when genomes are supplied and the user
-        // hasn't overridden the reference. FastANI is otherwise skipped in this
-        // mode, so only run it when the Gubbins track will actually use the result.
-        if (params.input && !params.ska_map_reference && gubbins_track_active) {
-            FASTANI_ALLVSALL(
-                ch_input.map { meta, fasta -> fasta }.collect()
+    // -----------------------------------------------------------------------
+    // Optional SKA2_DELETE: remove specified samples from the merged SKF before
+    // distances / reference selection, so the reference is chosen from retained
+    // samples. Applies to both pipeline-produced and user-supplied merged SKFs.
+    // -----------------------------------------------------------------------
+    if (params.ska_delete_samples) {
+        ch_delete_file = Channel.fromPath(params.ska_delete_samples, checkIfExists: true)
+        SKA2_DELETE(ch_merged_skf, ch_delete_file)
+        ch_versions   = ch_versions.mix(SKA2_DELETE.out.versions)
+        ch_merged_skf = SKA2_DELETE.out.skf
+    }
+
+    // -----------------------------------------------------------------------
+    // ska2 pairwise SNP distances → ska map reference (medoid) and/or QC NJ tree.
+    // Computed when the user asks for them (--ska_distance) or when needed to
+    // auto-select the reference.
+    // -----------------------------------------------------------------------
+    // Candidate genomes for the reference. With --ska_map_ref_trusted_only, only
+    // trusted=true genomes are eligible; otherwise all input genomes are.
+    def ch_ref_fastas = params.ska_map_ref_trusted_only
+        ? ch_input.filter { meta, fasta -> meta.trusted }.map { meta, fasta -> fasta }.collect()
+        : ch_input.map { meta, fasta -> fasta }.collect()
+
+    // Auto-select a reference only when the Gubbins track is active, no explicit
+    // override was given, and input genomes are available to emit it from.
+    ref_auto_needed = gubbins_track_active && !params.ska_map_reference && params.input
+
+    ch_distances = Channel.empty()
+    ch_nj_ska2   = Channel.empty()
+    if (params.ska_distance || ref_auto_needed) {
+        SKA2_DISTANCE(ch_merged_skf)
+        ch_versions  = ch_versions.mix(SKA2_DISTANCE.out.versions)
+        ch_distances = SKA2_DISTANCE.out.distances
+
+        if (params.ska_distance) {
+            NJ_TREE_SKA2(
+                SKA2_DISTANCE.out.distances
+                    .map { f -> [ [id: 'ska2_distance', format: 'ska2'], f ] }
             )
-            SELECT_REFERENCE(
-                FASTANI_ALLVSALL.out.ani,
-                ch_input.map { meta, fasta -> fasta }.collect()
-            )
+            ch_versions = ch_versions.mix(NJ_TREE_SKA2.out.versions)
+            ch_nj_ska2  = NJ_TREE_SKA2.out.tree
+        }
+
+        if (ref_auto_needed) {
+            // Pick the ska2 SNP-distance medoid (lowest mean pairwise distance).
+            SELECT_REFERENCE(SKA2_DISTANCE.out.distances, ch_ref_fastas)
             ch_versions      = ch_versions.mix(SELECT_REFERENCE.out.versions)
             ch_map_reference = SELECT_REFERENCE.out.reference
         }
-    } else {
+    }
+
+    // -----------------------------------------------------------------------
+    // Optional FastANI all-vs-all QC (ANI matrix + NJ tree). No longer used for
+    // reference selection; enable with --run_fastani. Needs the input genomes.
+    // -----------------------------------------------------------------------
+    if (params.run_fastani && params.input) {
         FASTANI_ALLVSALL(
             ch_input.map { meta, fasta -> fasta }.collect()
         )
+        ch_versions = ch_versions.mix(FASTANI_ALLVSALL.out.versions)
 
         NJ_TREE_FASTANI(
             FASTANI_ALLVSALL.out.ani
@@ -90,24 +140,6 @@ workflow SUBSPECIES_PHYLOGENY {
         )
         ch_versions   = ch_versions.mix(NJ_TREE_FASTANI.out.versions)
         ch_nj_fastani = NJ_TREE_FASTANI.out.tree
-
-        // Select the FastANI medoid as the ska map reference (unless overridden below).
-        // When --ska_map_ref_trusted_only is set, only genomes marked trusted=true in
-        // the samplesheet are eligible; otherwise all input genomes are candidates.
-        def ch_ref_fastas = params.ska_map_ref_trusted_only
-            ? ch_input.filter { meta, fasta -> meta.trusted }.map { meta, fasta -> fasta }.collect()
-            : ch_input.map { meta, fasta -> fasta }.collect()
-
-        SELECT_REFERENCE(
-            FASTANI_ALLVSALL.out.ani,
-            ch_ref_fastas
-        )
-        ch_versions      = ch_versions.mix(SELECT_REFERENCE.out.versions)
-        ch_map_reference = SELECT_REFERENCE.out.reference
-
-        SKA2_PHYLOGENY(ch_input)
-        ch_versions   = ch_versions.mix(SKA2_PHYLOGENY.out.versions)
-        ch_merged_skf = SKA2_PHYLOGENY.out.merged_skf
     }
 
     // User-supplied reference takes priority over the auto-selected medoid.
@@ -119,44 +151,14 @@ workflow SUBSPECIES_PHYLOGENY {
 
     // Warn loudly when the Gubbins track will silently produce nothing because
     // no reference could be resolved: merged-SKF mode, no --ska_map_reference
-    // override, and no --input genomes to compute a medoid from.
+    // override, and no --input genomes to compute a distance medoid from.
     if (params.ska_merged_skf && !params.ska_map_reference && !params.input && gubbins_track_active) {
         log.warn(
             "SKA2_MAP and GUBBINS will be skipped: --ska_merged_skf is set without " +
             "--ska_map_reference, and no --input samplesheet was provided to auto-select " +
-            "a FastANI medoid reference. To run the Gubbins track, set --ska_map_reference " +
-            "<ref.fasta>, or pass --input <samplesheet.csv> to pick the medoid automatically."
+            "a ska2 SNP-distance medoid reference. To run the Gubbins track, set " +
+            "--ska_map_reference <ref.fasta>, or pass --input <samplesheet.csv>."
         )
-    }
-
-    // -----------------------------------------------------------------------
-    // Optional SKA2_DELETE: remove specified samples from the merged SKF.
-    // Applies to both pipeline-produced and user-supplied merged SKFs so
-    // outliers can be excluded before alignment without rebuilding.
-    // -----------------------------------------------------------------------
-    if (params.ska_delete_samples) {
-        ch_delete_file = Channel.fromPath(params.ska_delete_samples, checkIfExists: true)
-        SKA2_DELETE(ch_merged_skf, ch_delete_file)
-        ch_versions   = ch_versions.mix(SKA2_DELETE.out.versions)
-        ch_merged_skf = SKA2_DELETE.out.skf
-    }
-
-    // -----------------------------------------------------------------------
-    // Optional SKA2_DISTANCE: pairwise SNP distances from merged SKF.
-    // -----------------------------------------------------------------------
-    ch_distances  = Channel.empty()
-    ch_nj_ska2    = Channel.empty()
-    if (params.ska_distance) {
-        SKA2_DISTANCE(ch_merged_skf)
-        ch_versions  = ch_versions.mix(SKA2_DISTANCE.out.versions)
-        ch_distances = SKA2_DISTANCE.out.distances
-
-        NJ_TREE_SKA2(
-            SKA2_DISTANCE.out.distances
-                .map { f -> [ [id: 'ska2_distance', format: 'ska2'], f ] }
-        )
-        ch_versions = ch_versions.mix(NJ_TREE_SKA2.out.versions)
-        ch_nj_ska2  = NJ_TREE_SKA2.out.tree
     }
 
     // -----------------------------------------------------------------------
@@ -276,10 +278,10 @@ workflow SUBSPECIES_PHYLOGENY {
     snp_sites  = ch_snp_sites   // per min-freq: [ val(meta), path(*.fas) ]
     gubbins    = ch_gubbins     // per min-freq: [ val(meta), path(*.filtered_polymorphic_sites.fasta) ]
     phylogeny  = ch_phylogeny   // per min-freq × gubbins track: [ val(meta), path(*.treefile) ]
-    distances  = ch_distances   // path(distances.tsv)              — only when params.ska_distance
+    distances  = ch_distances   // path(distances.tsv)              — when ska_distance or reference auto-select
     lo_snps    = ch_lo_snps     // path(*_snps.fas)                 — only when params.ska_lo
     lo_indels  = ch_lo_indels   // path(*_indels.vcf)               — only when params.ska_lo
-    nj_fastani = ch_nj_fastani  // [ val(meta), path(fastani.nwk) ] — only when !params.ska_merged_skf
+    nj_fastani = ch_nj_fastani  // [ val(meta), path(fastani.nwk) ] — only when params.run_fastani
     nj_ska2    = ch_nj_ska2     // [ val(meta), path(ska2_dist.nwk) ] — only when params.ska_distance
     multiqc    = MULTIQC.out.report
     versions   = ch_versions

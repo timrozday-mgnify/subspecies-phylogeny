@@ -1,0 +1,57 @@
+nextflow_process {
+    name "Test Process SELECT_REFERENCE"
+    script "../main.nf"
+    process "SELECT_REFERENCE"
+
+    tag "modules"
+    tag "select_reference"
+
+    test("ska2 distance medoid of three B. uniformis genomes") {
+        when {
+            process {
+                """
+                // Mean Mismatches(proportion): BU_61=0.00563, BU_909=0.005525,
+                // BU_AN67=0.005685 -> medoid is BU_909_NT5401.1.
+                input[0] = file(params.test_data_base + 'ska2_distances_three_samples.tsv', checkIfExists: true)
+                input[1] = [
+                    file(params.test_data_base + 'BU_61_NT5381.1.fa',  checkIfExists: true),
+                    file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true),
+                    file(params.test_data_base + 'BU_AN67_NT5182.1.fa', checkIfExists: true)
+                ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.reference.get(0)).exists() },
+                // The chosen reference must be the BU_909 medoid, byte-for-byte
+                // (md5 of tests/data/BU_909_NT5401.1.fa).
+                { assert path(process.out.reference.get(0)).md5 == "89c41aeba26c147d613a2a423c3749b0" },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
+    test("ska2 distance medoid - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = file('distances.tsv')
+                input[1] = [ file('a.fa'), file('b.fa') ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+}
