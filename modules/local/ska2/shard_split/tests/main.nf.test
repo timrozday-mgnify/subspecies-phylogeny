@@ -27,7 +27,6 @@ nextflow_process {
                 """
                 input[0] = SKA2_BUILD.out.skf
                 input[1] = 4
-                input[2] = 9
                 """
             }
         }
@@ -52,7 +51,6 @@ nextflow_process {
                 """
                 input[0] = [ [ id:'BU_61' ], file('stub.skf') ]
                 input[1] = 4
-                input[2] = 9
                 """
             }
         }

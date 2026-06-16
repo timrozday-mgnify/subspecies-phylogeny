@@ -30,13 +30,12 @@ workflow SKA2_PHYLOGENY {
             .min()
     }
 
-    // Sharded merge: split each sample by minimizer into params.ska_shard_count
-    // bins, merge each bin across samples (~1/n of the key space per task), weed
-    // each merged bin at merge_min_freq, then concatenate the bins into merged.skf.
+    // Sharded merge: split each sample into params.ska_shard_count bins by
+    // full-flank hash, merge each bin across samples (~1/n of the key space per
+    // task), weed each merged bin at merge_min_freq, then concatenate into merged.skf.
     SKA2_SHARDED_MERGE(
         ch_skf,
         params.ska_shard_count as Integer,
-        params.ska_shard_minimizer_len as Integer,
         merge_min_freq
     )
     ch_versions = ch_versions.mix(SKA2_SHARDED_MERGE.out.versions)

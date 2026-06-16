@@ -1,9 +1,8 @@
-// Minimizer-sharded merge subworkflow — a memory-bounded alternative to
-// SKA2_BATCHED_MERGE.
+// Sharded merge subworkflow — a memory-bounded alternative to SKA2_BATCHED_MERGE.
 //
-// Each per-sample SKF is split into n_shards bins by split-kmer minimizer
-// (SKA2_SHARD_SPLIT). Because split-kmer keys are canonical, the same k-mer goes
-// to the same bin in every sample, so each bin can be merged across samples
+// Each per-sample SKF is split into n_shards bins by hashing the full split-kmer
+// flank (SKA2_SHARD_SPLIT). Because split-kmer keys are canonical, the same k-mer
+// goes to the same bin in every sample, so each bin can be merged across samples
 // independently (SKA2_MERGE_SHARD) — every per-bin merge touches only ~1/n_shards
 // of the key space, bounding peak memory and running fully in parallel. The merged
 // bins are then concatenated back into one merged.skf (SKA2_SHARD_CONCAT).
@@ -20,17 +19,16 @@ include { SKA2_SHARD_CONCAT                     } from '../../../modules/local/s
 
 workflow SKA2_SHARDED_MERGE {
     take:
-    ch_skf         // channel: path(*.skf) — one per sample (bare path, like SKA2_BATCHED_MERGE)
-    n_shards       // val: int — number of minimizer bins
-    minimizer_len  // val: int — minimizer (l-mer) length, must be <= k-1
-    min_freq       // val: double — final weed threshold (0 = no weed)
+    ch_skf    // channel: path(*.skf) — one per sample (bare path, like SKA2_BATCHED_MERGE)
+    n_shards  // val: int — number of bins
+    min_freq  // val: double — final weed threshold (0 = no weed)
 
     main:
     ch_versions = Channel.empty()
 
     // Synthesise a per-sample id from the filename so shard outputs are distinct.
     ch_split_in = ch_skf.map { skf -> [ [id: skf.baseName], skf ] }
-    SKA2_SHARD_SPLIT(ch_split_in, n_shards, minimizer_len)
+    SKA2_SHARD_SPLIT(ch_split_in, n_shards)
     ch_versions = ch_versions.mix(SKA2_SHARD_SPLIT.out.versions.first())
 
     // Regroup shards by bin index across all samples (parse trailing `.<i>.skf`),

@@ -10,13 +10,12 @@ process SKA2_SHARD_SPLIT {
     label 'process_low'
 
     container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
-        'oras://ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.1-sif' :
-        'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.1' }"
+        'oras://ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.2-sif' :
+        'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.2' }"
 
     input:
     tuple val(meta), path(skf)
     val(n_shards)
-    val(minimizer_len)
 
     output:
     tuple val(meta), path("${prefix}.*.skf"), emit: bins
@@ -32,7 +31,6 @@ process SKA2_SHARD_SPLIT {
     ska-shard split \\
         $args \\
         -n ${n_shards} \\
-        -l ${minimizer_len} \\
         -o ${prefix} \\
         ${skf}
 

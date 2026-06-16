@@ -10,8 +10,8 @@ process SKA2_SHARD_CONCAT {
     label 'process_low'
 
     container "${ workflow.containerEngine in ['singularity', 'apptainer'] && !task.ext.singularity_pull_docker_container ?
-        'oras://ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.1-sif' :
-        'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.1' }"
+        'oras://ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.2-sif' :
+        'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.2' }"
 
     input:
     path(shard_skfs, stageAs: '?/*')
