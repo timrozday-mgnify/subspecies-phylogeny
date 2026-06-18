@@ -28,16 +28,13 @@ nextflow_pipeline {
                 { assert path("${params.outdir}/iqtree/gubbins/min_freq_0.9/tree.treefile").exists() },
 
                 // SKA2 full SNP alignment — 3 sequences
-                { assert path("${params.outdir}/ska2/min_freq_0.9/alignment.fasta").exists() },
-                { assert path("${params.outdir}/ska2/min_freq_0.9/alignment.fasta")
+                { assert path("${params.outdir}/ska2/align/min_freq_0.9/alignment.fasta").exists() },
+                { assert path("${params.outdir}/ska2/align/min_freq_0.9/alignment.fasta")
                     .readLines().count { it.startsWith('>') } == 3 },
 
-                // merged.skf published for reanalysis
-                { assert path("${params.outdir}/ska2/merged.skf").exists() },
-
-                // per-sample .skf files published in ska2/skf/
-                { assert new File("${params.outdir}/ska2/skf").listFiles()
-                    .any { it.name.endsWith('.skf') } },
+                // merged.skf published for reanalysis; per-sample SKFs are not published
+                { assert path("${params.outdir}/ska2/merge/merged.skf").exists() },
+                { assert !path("${params.outdir}/ska2/skf").exists() },
 
                 // snp-sites variable-sites alignment
                 { assert path("${params.outdir}/snpsites/min_freq_0.9/0.9.fas").exists() },
