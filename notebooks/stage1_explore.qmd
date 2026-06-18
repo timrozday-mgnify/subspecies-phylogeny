@@ -14,6 +14,8 @@ params:
   results_dir: "../results/01_explore"
   run_name: "pipeline run"
   highlights_file: ""
+  metadata_file: ""
+  skip_large_pairwise_plots: false
 ---
 
 <!--
@@ -23,6 +25,8 @@ Render command (use absolute paths — Quarto resolves paths relative to the not
       /path/to/subspecies-phylogeny/notebooks/stage1_explore.qmd \
       -P results_dir:/absolute/path/to/run/results/01_explore \
       -P run_name:Buniformis \
+      -P metadata_file:/absolute/path/to/run/genome_metadata.csv \
+      -P skip_large_pairwise_plots:false \
       --output-dir /absolute/path/to/run/notebooks/
 
   Example for Buniformis:
@@ -48,6 +52,8 @@ Static image export for Plotly figures (PNG/SVG) requires kaleido:
 results_dir     = "../results/01_explore"
 run_name        = "pipeline run"
 highlights_file = ""
+metadata_file   = ""
+skip_large_pairwise_plots = False
 ```
 
 ```{python}
@@ -82,14 +88,26 @@ warnings.filterwarnings('ignore')
 # Convert injected param strings to Path objects
 results_dir = Path(results_dir)
 run_name    = str(run_name)
+
+def _as_bool(value):
+    """Parse Quarto -P boolean-ish values consistently."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+skip_large_pairwise_plots = _as_bool(skip_large_pairwise_plots)
+
 # Aliases used throughout — all three now point to the same directory
 build_dir   = results_dir
 explore_dir = results_dir
 qc_dir_path = results_dir
 
-# ---- Highlights config -----------------------------------------------
+# ---- Highlights and optional genome metadata -------------------------
 _DEFAULT_PALETTE = ['#e63946', '#f4a261', '#2a9d8f', '#8338ec', '#fb8500']
 highlights = {}   # name -> {'label': str, 'color': str}
+genome_metadata_classes = {}  # normalized sample name -> isolate|MAG
+genome_metadata_status = "not provided"
+genome_metadata_counts = {}
 
 _hf = str(highlights_file).strip()
 if _hf:
@@ -104,10 +122,109 @@ if _hf:
 
 
 DEFAULT_TIP_COLOR = '#457b9d'
+METADATA_STYLES = {
+    'isolate': {'label': 'Isolate', 'color': '#1b9e77', 'symbol': 'I'},
+    'MAG': {'label': 'MAG', 'color': '#7570b3', 'symbol': 'M'},
+}
+
+
+def sample_key(name):
+    """Normalize sample IDs across tree labels, FASTA names, and metadata rows."""
+    key = str(name).strip()
+    key = re.sub(r'\.(fa|fasta|fna)$', '', key, flags=re.IGNORECASE)
+    return re.sub(r'\.\d+$', '', key)
+
+
+def metadata_class(name):
+    return (
+        genome_metadata_classes.get(str(name).strip())
+        or genome_metadata_classes.get(sample_key(name))
+    )
+
+
+def is_ref_sample(name):
+    return bool(
+        ref_name
+        and (
+            str(name).strip() == str(ref_name).strip()
+            or sample_key(name) == sample_key(ref_name)
+        )
+    )
+
+
+def _class_from_isolate(value):
+    if pd.isna(value):
+        return None
+    return 'isolate' if _as_bool(value) else 'MAG'
+
+
+_mf = str(metadata_file).strip()
+if _mf:
+    _metadata_path = Path(_mf)
+    if _metadata_path.exists():
+        try:
+            _metadata_df = pd.read_csv(_metadata_path)
+            _metadata_cols = {c.lower(): c for c in _metadata_df.columns}
+            if {'sample', 'isolate'}.issubset(_metadata_cols):
+                _sample_col = _metadata_cols['sample']
+                _isolate_col = _metadata_cols['isolate']
+                for _, _row in _metadata_df.iterrows():
+                    _cls = _class_from_isolate(_row[_isolate_col])
+                    if _cls:
+                        genome_metadata_classes[sample_key(_row[_sample_col])] = _cls
+                genome_metadata_counts = dict(
+                    pd.Series(list(genome_metadata_classes.values())).value_counts()
+                )
+                genome_metadata_status = (
+                    f"loaded {len(genome_metadata_classes)} sample annotations "
+                    f"from {_metadata_path}"
+                )
+            else:
+                genome_metadata_status = (
+                    f"ignored {_metadata_path} because it lacks sample/isolate columns"
+                )
+        except Exception as exc:
+            genome_metadata_status = f"ignored {_metadata_path}: {exc}"
+    else:
+        genome_metadata_status = f"not found: {_metadata_path}"
 
 
 def tip_color(name):
-    return highlights[name]['color'] if name in highlights else DEFAULT_TIP_COLOR
+    if name in highlights:
+        return highlights[name]['color']
+    _cls = metadata_class(name)
+    if _cls:
+        return METADATA_STYLES[_cls]['color']
+    return DEFAULT_TIP_COLOR
+
+
+def tip_size(name):
+    if name in highlights:
+        return 9
+    if metadata_class(name):
+        return 7
+    return 5
+
+
+def sample_display_label(name, html=False, include_ref=True):
+    label = str(name)
+    prefix = []
+    if include_ref and is_ref_sample(name):
+        prefix.append('★')
+    _cls = metadata_class(name)
+    if _cls:
+        prefix.append(METADATA_STYLES[_cls]['symbol'])
+    text = f"{' '.join(prefix)} {label}".strip()
+    if html and _cls:
+        color = METADATA_STYLES[_cls]['color']
+        return f"<span style='color:{color}'>{text}</span>"
+    if html and name in highlights:
+        return f"<b>{text}</b>"
+    return text
+
+
+def sample_colors(names):
+    return [tip_color(name) for name in names]
 
 # Output directories co-located with the pipeline results
 figs_dir   = explore_dir / "figs"   / "stage2"
@@ -141,6 +258,18 @@ PLOTLY_LAYOUT = dict(
     template='plotly_white',
     font=dict(family='Arial, sans-serif', size=13),
 )
+
+
+def display_note_callout(title, body_html):
+    display(HTML(
+        '<div class="callout callout-style-default callout-note callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        f'<div class="callout-title-container flex-fill">{title}</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'{body_html}'
+        '</div></div>'
+    ))
 ```
 
 ```{python}
@@ -360,20 +489,32 @@ qc_summary_df = pd.concat(_qc_parts, axis=1).reset_index().rename(columns={'inde
     if _qc_parts else pd.DataFrame()
 
 # --- Reference genome (SELECT_REFERENCE medoid) ----------------------
-# Try the published reference.fa; fall back to the highest-mean-ANI sample.
+# Try the published reference.fa only if its header maps to a known sample;
+# otherwise fall back to the highest-mean-ANI sample.
 ref_name = None
+ref_name_source = "not found"
 _ref_fa = results_dir / "ska2" / "map" / "reference.fa"
+_known_ref_names = list(dict.fromkeys(leaf_order + ani_matrix.index.tolist()))
 if _ref_fa.exists():
     with open(_ref_fa) as _fh:
         _hdr = _fh.readline().strip().lstrip('>')
-    ref_name = re.sub(r'\.fa(sta)?$', '', _hdr.split()[0])
-elif not ani_matrix.empty:
+    _ref_candidate = re.sub(r'\.fa(sta)?$', '', _hdr.split()[0])
+    _ref_matches = [
+        name for name in _known_ref_names
+        if name == _ref_candidate or sample_key(name) == sample_key(_ref_candidate)
+    ]
+    if _ref_matches:
+        ref_name = _ref_matches[0]
+        ref_name_source = "reference.fa"
+if ref_name is None and not ani_matrix.empty:
     _diag = ani_matrix.copy().astype(float)
     np.fill_diagonal(_diag.values, np.nan)
     ref_name = _diag.mean(axis=1).idxmax()
+    ref_name_source = "FastANI medoid"
 
 # --- Detailed GFF parsing (recombination block coordinates) ----------
 gubbins_gff = {}   # mf -> DataFrame[sample, start, end, length, snp_count, node]
+gubbins_gff_malformed_rows = {}   # mf -> skipped malformed feature rows
 _genome_len  = 0   # largest sequence-region seen across all GFFs
 
 for _mf, _d in gubbins_data.items():
@@ -385,6 +526,7 @@ for _mf, _d in gubbins_data.items():
         continue
     _rows   = []
     _seq_len = None
+    _malformed = 0
     with open(_gff_list[0]) as _fh:
         for _line in _fh:
             _line = _line.rstrip()
@@ -398,6 +540,9 @@ for _mf, _d in gubbins_data.items():
             _parts = _line.split('\t')
             if len(_parts) < 9:
                 continue
+            if not (_parts[3].isdigit() and _parts[4].isdigit()):
+                _malformed += 1
+                continue
             _start = int(_parts[3])
             _end   = int(_parts[4])
             _attrs = {}
@@ -406,7 +551,10 @@ for _mf, _d in gubbins_data.items():
                 if '=' in _item:
                     _k, _v = _item.split('=', 1)
                     _attrs[_k.strip()] = _v.strip().strip('"')
-            _snp = int(_attrs.get('snp_count', 0))
+            try:
+                _snp = int(_attrs.get('snp_count', 0))
+            except (TypeError, ValueError):
+                _snp = 0
             _node = _attrs.get('node', '')
             for _taxon in _attrs.get('taxa', '').split():
                 _rows.append({
@@ -425,6 +573,8 @@ for _mf, _d in gubbins_data.items():
     elif not _df.empty:
         _genome_len = max(_genome_len, int(_df['end'].max()))
     gubbins_gff[_mf] = _df
+    if _malformed:
+        gubbins_gff_malformed_rows[_mf] = _malformed
 
 _genome_len = _genome_len or 4_400_000
 ```
@@ -435,30 +585,86 @@ _genome_len = _genome_len or 4_400_000
 # Helper: toytree rendering
 # ============================================================
 
-def draw_toytree(tt, title=None, tip_font_size='10px', width=900):
+def draw_toytree(
+    tt,
+    title=None,
+    tip_font_size='10px',
+    width=900,
+    height=None,
+    show_tip_labels=True,
+    compact_highlight_ticks=False,
+):
     """Draw a toytree and return (canvas, html_str, svg_str)."""
     tips        = tt.get_tip_labels()
     tip_colors  = [tip_color(t) for t in tips]
-    tip_sizes   = [9 if t in highlights else 5 for t in tips]
+    tip_sizes   = [tip_size(t) for t in tips]
 
     # node_sizes / node_colors must span all nodes (tips + internal)
     n_internal  = tt.nnodes - tt.ntips
     all_colors  = tip_colors + ['#888888'] * n_internal
     all_sizes   = tip_sizes  + [0]         * n_internal
-    height      = max(500, tt.ntips * 14)
+    height      = height or max(500, tt.ntips * 14)
 
-    canvas, axes, mark = tt.draw(
+    draw_kwargs = dict(
         width=width, height=height,
-        tip_labels=True,
-        tip_labels_colors=tip_colors,
-        tip_labels_style={'font-size': tip_font_size},
+        tip_labels=show_tip_labels,
         node_sizes=all_sizes,
         node_colors=all_colors,
         node_style={'stroke': 'none'},
         layout='r',
     )
+    if show_tip_labels:
+        draw_kwargs.update(
+            tip_labels_colors=tip_colors,
+            tip_labels_style={'font-size': tip_font_size},
+        )
+
+    canvas, axes, mark = tt.draw(**draw_kwargs)
     if title:
         axes.label.text = title
+    if compact_highlight_ticks:
+        _tip_y = {tip: float(i) for i, tip in enumerate(tips)}
+        _x_tip = float(np.nanmax(mark.ntable[:tt.ntips, 0]))
+        _x_min = float(np.nanmin(mark.ntable[:, 0]))
+        _x_span = max(_x_tip - _x_min, 1e-6)
+
+        def _draw_tick_group(names, color, start_mult, end_mult, stroke_width):
+            _ys = [_tip_y[n] for n in names if n in _tip_y]
+            if not _ys:
+                return
+            _x0 = _x_tip + _x_span * start_mult
+            _x1 = _x_tip + _x_span * end_mult
+            _xs = []
+            _yy = []
+            for _y in _ys:
+                _xs.extend([_x0, _x1, np.nan])
+                _yy.extend([_y, _y, np.nan])
+            axes.plot(
+                _xs,
+                _yy,
+                color=color,
+                stroke_width=stroke_width,
+                opacity=0.95,
+                style={'stroke-linecap': 'round'},
+            )
+
+        _isolates = [tip for tip in tips if metadata_class(tip) == 'isolate']
+        _draw_tick_group(
+            _isolates,
+            METADATA_STYLES['isolate']['color'],
+            start_mult=0.015,
+            end_mult=0.085,
+            stroke_width=2.2,
+        )
+        if ref_name:
+            _ref_ticks = [tip for tip in tips if is_ref_sample(tip)] or [ref_name]
+            _draw_tick_group(
+                _ref_ticks,
+                '#d62728',
+                start_mult=0.010,
+                end_mult=0.145,
+                stroke_width=4.0,
+            )
 
     html_io = io.BytesIO()
     toyplot.html.render(canvas, html_io)
@@ -485,13 +691,30 @@ display(Markdown(f"""
 | Results directory | `{results_dir.resolve()}` |
 | Samples | {n_samples} |
 | **ska map reference (medoid)** | **{_ref_display}** |
+| Reference highlight source | {ref_name_source} |
 | Min-freq values tested | {sorted(stats_df['min_freq'].tolist())} |
 | Alignment files found | {len(align_rows)} |
 | SNP-sites files found | {len(snp_rows)} |
 | Gubbins results available for | {available_gubbins_mf} |
+| Skip large pairwise plots | {skip_large_pairwise_plots} |
+| Genome metadata | {genome_metadata_status} |
 | Figures saved to | `{figs_dir.resolve()}` |
 | Tables saved to | `{tables_dir.resolve()}` |
 """))
+
+if genome_metadata_classes:
+    _legend_rows = [
+        f"| <span style='color:{style['color']}'>{style['symbol']}</span> | "
+        f"{style['label']} | {genome_metadata_counts.get(cls, 0)} | "
+        f"<span style='color:{style['color']}'>●</span> |"
+        for cls, style in METADATA_STYLES.items()
+    ]
+    display(Markdown(
+        "**Genome metadata legend**\n\n"
+        "| Label prefix | Class | Samples | Tip colour |\n"
+        "|--------------|-------|---------|------------|\n"
+        + "\n".join(_legend_rows)
+    ))
 
 if len(align_rows) == 0:
     display(HTML(
@@ -568,7 +791,7 @@ if not qc_summary_df.empty:
         for col in _cols:
             val = row[col]
             if col == 'Sample':
-                _cells.append(f'<td><b>{val}</b></td>')
+                _cells.append(f'<td><b>{sample_display_label(val, html=True)}</b></td>')
             elif col == 'GUNC pass':
                 bg = 'background:#d4edda' if val is True else ('background:#f8d7da' if val is False else '')
                 label = '✓' if val is True else ('✗' if val is False else '—')
@@ -653,19 +876,21 @@ if not quast_qc_df.empty:
                [s for s in _qst['Sample'] if s not in leaf_order]
 
     fig_n50 = go.Figure()
+    _qst_y = [sample_display_label(s) for s in _qst_ord]
     fig_n50.add_trace(go.Bar(
         x=_qst.set_index('Sample').reindex(_qst_ord)['N50'].tolist(),
-        y=_qst_ord,
+        y=_qst_y,
         orientation='h',
-        marker_color='steelblue',
-        hovertemplate='%{y}<br>N50: %{x:,} bp<extra></extra>',
+        marker_color=sample_colors(_qst_ord),
+        customdata=_qst_ord,
+        hovertemplate='%{customdata}<br>N50: %{x:,} bp<extra></extra>',
     ))
     fig_n50.update_layout(
         **PLOTLY_LAYOUT,
         title=f'Assembly N50 — {run_name}',
         xaxis=dict(title='N50 (bp)', tickformat=','),
         yaxis=dict(tickfont=dict(size=9),
-                   categoryorder='array', categoryarray=list(reversed(_qst_ord))),
+                   categoryorder='array', categoryarray=list(reversed(_qst_y))),
         height=max(450, len(_qst_ord) * 14 + 100),
         margin=dict(l=190),
     )
@@ -674,21 +899,23 @@ if not quast_qc_df.empty:
 
     # Contig count — flag high values
     _n_med = _qst['# contigs'].median()
-    _clrs = ['#d62728' if n > _n_med * 3 else '#1f77b4'
-             for n in _qst.set_index('Sample').reindex(_qst_ord)['# contigs']]
+    _qst_contigs = _qst.set_index('Sample').reindex(_qst_ord)['# contigs']
+    _clrs = ['#d62728' if n > _n_med * 3 else tip_color(s)
+             for s, n in zip(_qst_ord, _qst_contigs)]
     fig_nc = go.Figure(go.Bar(
-        x=_qst.set_index('Sample').reindex(_qst_ord)['# contigs'].tolist(),
-        y=_qst_ord,
+        x=_qst_contigs.tolist(),
+        y=_qst_y,
         orientation='h',
         marker_color=_clrs,
-        hovertemplate='%{y}<br># contigs: %{x}<extra></extra>',
+        customdata=_qst_ord,
+        hovertemplate='%{customdata}<br># contigs: %{x}<extra></extra>',
     ))
     fig_nc.update_layout(
         **PLOTLY_LAYOUT,
         title=f'Number of contigs — {run_name}',
         xaxis_title='# contigs (red = > 3× median)',
         yaxis=dict(tickfont=dict(size=9),
-                   categoryorder='array', categoryarray=list(reversed(_qst_ord))),
+                   categoryorder='array', categoryarray=list(reversed(_qst_y))),
         height=max(450, len(_qst_ord) * 14 + 100),
         margin=dict(l=190),
     )
@@ -705,14 +932,17 @@ if not gunc_df.empty:
     _gf_ord = [s for s in leaf_order if s in _gf['genome'].values] + \
               [s for s in _gf['genome'] if s not in leaf_order]
     _gf_re = _gf.set_index('genome').reindex(_gf_ord)
-    _clrs_g = ['#d62728' if not p else '#1f77b4' for p in _gf_re['pass.GUNC']]
+    _gf_y = [sample_display_label(s) for s in _gf_ord]
+    _clrs_g = ['#d62728' if not p else tip_color(s)
+               for s, p in zip(_gf_ord, _gf_re['pass.GUNC'])]
 
     fig_gunc = go.Figure(go.Bar(
         x=_gf_re['clade_separation_score'].tolist(),
-        y=_gf_ord,
+        y=_gf_y,
         orientation='h',
         marker_color=_clrs_g,
-        hovertemplate='%{y}<br>CSS: %{x:.4f}<extra></extra>',
+        customdata=_gf_ord,
+        hovertemplate='%{customdata}<br>CSS: %{x:.4f}<extra></extra>',
     ))
     fig_gunc.add_vline(x=0.45, line=dict(color='red', dash='dash', width=1.5),
                        annotation_text='0.45', annotation_position='top right')
@@ -722,7 +952,7 @@ if not gunc_df.empty:
         xaxis=dict(title='Clade separation score (red = FAIL, threshold 0.45)',
                    rangemode='tozero'),
         yaxis=dict(tickfont=dict(size=9),
-                   categoryorder='array', categoryarray=list(reversed(_gf_ord))),
+                   categoryorder='array', categoryarray=list(reversed(_gf_y))),
         height=max(450, len(_gf_ord) * 14 + 100),
         margin=dict(l=190),
     )
@@ -734,6 +964,7 @@ if not magpurify_qc_df.empty:
     _mf_ord = [s for s in leaf_order if s in _mf['Sample'].values] + \
               [s for s in _mf['Sample'] if s not in leaf_order]
     _mf_re = _mf.set_index('Sample').reindex(_mf_ord)
+    _mf_y = [sample_display_label(s) for s in _mf_ord]
 
     fig_mag = go.Figure()
     for _col, _name, _clr in [
@@ -744,9 +975,10 @@ if not magpurify_qc_df.empty:
         if _col in _mf_re.columns:
             fig_mag.add_trace(go.Bar(
                 x=_mf_re[_col].fillna(0).tolist(),
-                y=_mf_ord, orientation='h', name=_name,
+                y=_mf_y, orientation='h', name=_name,
                 marker_color=_clr, opacity=0.8,
-                hovertemplate='%{y}<br>' + _name + ': %{x} contig(s)<extra></extra>',
+                customdata=_mf_ord,
+                hovertemplate='%{customdata}<br>' + _name + ': %{x} contig(s)<extra></extra>',
             ))
     fig_mag.update_layout(
         **PLOTLY_LAYOUT,
@@ -754,7 +986,7 @@ if not magpurify_qc_df.empty:
         title=f'MAGpurify flagged contigs per sample — {run_name}',
         xaxis_title='# flagged contigs',
         yaxis=dict(tickfont=dict(size=9),
-                   categoryorder='array', categoryarray=list(reversed(_mf_ord))),
+                   categoryorder='array', categoryarray=list(reversed(_mf_y))),
         height=max(450, len(_mf_ord) * 14 + 100),
         margin=dict(l=190),
         legend=dict(title='Module'),
@@ -788,7 +1020,7 @@ all others) is labelled **★** in the tree below and highlighted in the heatmap
 
 ```{python}
 #| echo: false
-from IPython.display import HTML
+from IPython.display import HTML, Markdown
 
 if tt is None:
     display(HTML(
@@ -803,27 +1035,49 @@ if tt is None:
     ))
 else:
     # Temporarily add the reference to highlights so draw_toytree colours it distinctly
-    _ref_in_highlights = ref_name and ref_name not in highlights
-    if _ref_in_highlights:
-        highlights[ref_name] = {'label': ref_name, 'color': '#d62728'}
+    _ref_highlight_names = [t for t in tt.get_tip_labels() if is_ref_sample(t)]
+    if ref_name and not _ref_highlight_names:
+        _ref_highlight_names = [ref_name]
+    _added_ref_highlights = []
+    for _ref_tip in _ref_highlight_names:
+        if _ref_tip not in highlights:
+            highlights[_ref_tip] = {'label': _ref_tip, 'color': '#d62728'}
+            _added_ref_highlights.append(_ref_tip)
 
     canvas, html_str, svg_str = draw_toytree(
         tt, title=f"FastANI NJ tree — {run_name}"
     )
 
     # Restore highlights so downstream plots are not affected
-    if _ref_in_highlights:
-        del highlights[ref_name]
+    for _ref_tip in _added_ref_highlights:
+        del highlights[_ref_tip]
 
     # Inject a ★ label into the SVG/HTML next to the reference tip
-    if ref_name:
-        html_str = html_str.replace(f'>{ref_name}<', f'>★ {ref_name}<')
-        svg_str  = svg_str.replace( f'>{ref_name}<', f'>★ {ref_name}<')
+    for _ref_tip in _ref_highlight_names:
+        html_str = html_str.replace(f'>{_ref_tip}<', f'>★ {_ref_tip}<')
+        svg_str  = svg_str.replace( f'>{_ref_tip}<', f'>★ {_ref_tip}<')
 
     (figs_dir / "fastani_nj_tree.svg").write_text(svg_str)
     (figs_dir / "fastani_nj_tree.html").write_text(html_str)
 
     display(HTML(html_str))
+
+    canvas_compact, html_compact, svg_compact = draw_toytree(
+        tt,
+        title=f"FastANI NJ tree, compact unlabeled view — {run_name}",
+        width=900,
+        height=1300,
+        show_tip_labels=False,
+        compact_highlight_ticks=True,
+    )
+    (figs_dir / "fastani_nj_tree_compact.svg").write_text(svg_compact)
+    (figs_dir / "fastani_nj_tree_compact.html").write_text(html_compact)
+
+    display(Markdown(
+        "**Compact unlabeled NJ tree**\n\n"
+        "Right-side ticks mark isolates in green and the FastANI medoid in red."
+    ))
+    display(HTML(html_compact))
 ```
 
 ### 1.2 Pairwise ANI heatmap (ordered by tree)
@@ -833,17 +1087,23 @@ samples appear as blocks along the diagonal.
 
 ```{python}
 #| echo: false
-if ani_matrix.empty:
+if skip_large_pairwise_plots:
+    display_note_callout(
+        "Large pairwise plot skipped",
+        "<p>The Pairwise ANI heatmap was skipped because "
+        "<code>skip_large_pairwise_plots</code> is enabled.</p>"
+    )
+elif ani_matrix.empty:
     display(HTML('<p><em>FastANI data not available — heatmap will appear once the pipeline has run.</em></p>'))
 else:
     # Reorder matrix by tree leaf order (only keep leaves present in matrix)
-    ordered = [s for s in leaf_order if s in ani_matrix.index]
+    ordered = [s for s in leaf_order if s in ani_matrix.index] or ani_matrix.index.tolist()
     mat = ani_matrix.reindex(index=ordered, columns=ordered)
 
     ani_min = np.nanmin(mat.values[mat.values < 100])  # exclude self-comparisons
     ani_min = max(ani_min - 0.5, 90)                   # clamp floor
 
-    ticktext = [f"<b>{s}</b>" if s in highlights else s for s in mat.index.tolist()]
+    ticktext = [sample_display_label(s, html=True) for s in mat.index.tolist()]
 
     fig_heat = go.Figure(data=go.Heatmap(
         z=mat.values,
@@ -882,6 +1142,9 @@ else:
 if ani_matrix.empty:
     display(HTML('<p><em>FastANI data not available — statistics will appear once the pipeline has run.</em></p>'))
 else:
+    ordered = [s for s in leaf_order if s in ani_matrix.index] or ani_matrix.index.tolist()
+    mat = ani_matrix.reindex(index=ordered, columns=ordered)
+
     # Off-diagonal only
     mask = np.ones(mat.shape, dtype=bool)
     np.fill_diagonal(mask, False)
@@ -1144,9 +1407,11 @@ if not recomb_df.empty:
             go.Bar(
                 name=f'min_freq={mf}',
                 x=sub['Total SNPs'],
-                y=sub['Node'],
+                y=[sample_display_label(n) for n in sub['Node']],
                 orientation='h',
-                hovertemplate='%{y}<br>Total SNPs: %{x:,}<extra></extra>',
+                marker_color=sample_colors(sub['Node']),
+                customdata=sub['Node'],
+                hovertemplate='%{customdata}<br>Total SNPs: %{x:,}<extra></extra>',
                 visible=(mf == sorted(recomb_df['min_freq'].unique())[0]),
             )
         )
@@ -1265,6 +1530,18 @@ Use the dropdown to compare thresholds. The ★ row marks the `ska map` referenc
 
 ```{python}
 #| echo: false
+if gubbins_gff_malformed_rows:
+    _bad_rows = ", ".join(
+        f"min_freq={_mf}: {_n} row(s)"
+        for _mf, _n in sorted(gubbins_gff_malformed_rows.items())
+    )
+    display_note_callout(
+        "Malformed Gubbins GFF rows skipped",
+        "<p>Some recombination prediction rows had non-numeric start/end "
+        "coordinates and were omitted from the recombination block plots: "
+        f"{_bad_rows}.</p>"
+    )
+
 _any_blocks = any(not df.empty for df in gubbins_gff.values())
 
 if _any_blocks:
@@ -1527,7 +1804,7 @@ if completeness_data:
         for s in _diag_order
     ])
 
-    _ytick = ['★ ' + s if s == ref_name else s for s in _diag_order]
+    _ytick = [sample_display_label(s) for s in _diag_order]
     fig_comp_heat = go.Figure(go.Heatmap(
         z=_comp_mat * 100,
         x=[str(m) for m in _mfs_c],
@@ -1570,9 +1847,9 @@ if completeness_data:
         _d     = completeness_data[_mf]
         _samps = [s for s in _diag_order if s in _d]
         _miss  = [(1 - _d[s]) * 100 for s in _samps]
-        _clrs  = ['#d62728' if m > 10 else '#ff7f0e' if m > 5 else '#1f77b4'
-                  for m in _miss]
-        _ylabs = ['★ ' + s if s == ref_name else s for s in _samps]
+        _clrs  = ['#d62728' if m > 10 else '#ff7f0e' if m > 5 else tip_color(s)
+                  for s, m in zip(_samps, _miss)]
+        _ylabs = [sample_display_label(s) for s in _samps]
         _miss_traces.append(go.Bar(
             x=_miss, y=_ylabs, orientation='h',
             marker_color=_clrs,
@@ -1593,7 +1870,7 @@ if completeness_data:
         for _j, _mf in enumerate(_mfs_m)
     ]
 
-    _yrev = list(reversed(['★ ' + s if s == ref_name else s for s in _diag_order]))
+    _yrev = list(reversed([sample_display_label(s) for s in _diag_order]))
     fig_miss = go.Figure(data=_miss_traces)
     fig_miss.add_vline(x=5,  line=dict(color='orange', dash='dash', width=1.5),
                        annotation_text='5 %',  annotation_position='top right')
@@ -1620,7 +1897,13 @@ closely related samples. Requires re-running with `--ska_distance true`.
 
 ```{python}
 #| echo: false
-if snp_dist_df is not None:
+if skip_large_pairwise_plots:
+    display_note_callout(
+        "Large pairwise plot skipped",
+        "<p>The Pairwise SKA2 SNP distance matrix was skipped because "
+        "<code>skip_large_pairwise_plots</code> is enabled.</p>"
+    )
+elif snp_dist_df is not None:
     _sd_samps = ([s for s in leaf_order if s in snp_dist_df.index] +
                  [s for s in snp_dist_df.index if s not in leaf_order])
     _sd_mat   = snp_dist_df.reindex(index=_sd_samps, columns=_sd_samps)
@@ -1664,7 +1947,13 @@ may indicate assembly artefacts or recent recombination. Requires §4.3 data.
 
 ```{python}
 #| echo: false
-if snp_dist_df is not None:
+if skip_large_pairwise_plots:
+    display_note_callout(
+        "Large pairwise plot skipped",
+        "<p>The ANI vs SNP distance scatterplot was skipped because "
+        "<code>skip_large_pairwise_plots</code> is enabled.</p>"
+    )
+elif snp_dist_df is not None:
     _both = [s for s in snp_dist_df.index if s in ani_matrix.index]
     _pair_rows = []
     for _i, _s in enumerate(_both):

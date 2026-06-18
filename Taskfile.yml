@@ -10,15 +10,22 @@ tasks:
   # Report rendering
   # Pass variables on the command line:
   #   task report:stage1 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun
+  #   task report:stage1 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun METADATA_FILE=/abs/path/to/genome_metadata.csv
+  #   task report:stage1 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun SKIP_LARGE_PAIRWISE_PLOTS=true
   #   task report:stage2 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun MIN_FREQ=0.95
+  #   task report:stage2 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun MIN_FREQ=0.95 METADATA_FILE=/abs/path/to/genome_metadata.csv
+  #   task report:stage2 RUN_DIR=/abs/path/to/run RUN_NAME=MyRun MIN_FREQ=0.95 SKIP_LARGE_PAIRWISE_PLOTS=true
   #   task report:all    RUN_DIR=/abs/path/to/run RUN_NAME=MyRun
   # RUN_DIR must be absolute (Quarto resolves -P paths relative to the .qmd file).
   # ---------------------------------------------------------------------------
 
   report:stage1:
-    desc: "Render stage1_explore.html for a pipeline run (RUN_DIR, RUN_NAME required)"
+    desc: "Render stage1_explore.html for a pipeline run (RUN_DIR, RUN_NAME required; METADATA_FILE optional; SKIP_LARGE_PAIRWISE_PLOTS default false)"
     requires:
       vars: [RUN_DIR, RUN_NAME]
+    vars:
+      METADATA_FILE: '{{.METADATA_FILE | default ""}}'
+      SKIP_LARGE_PAIRWISE_PLOTS: '{{.SKIP_LARGE_PAIRWISE_PLOTS | default "false"}}'
     cmds:
       - mkdir -p "{{.RUN_DIR}}/notebooks"
       - |
@@ -26,14 +33,18 @@ tasks:
           "{{.TASKFILE_DIR}}/notebooks/stage1_explore.qmd" \
           -P results_dir:"{{.RUN_DIR}}/results/01_explore" \
           -P run_name:"{{.RUN_NAME}}" \
+          -P metadata_file:"{{.METADATA_FILE}}" \
+          -P skip_large_pairwise_plots:"{{.SKIP_LARGE_PAIRWISE_PLOTS}}" \
           --output-dir "{{.RUN_DIR}}/notebooks/"
 
   report:stage2:
-    desc: "Render stage2_build.html for a pipeline run (RUN_DIR, RUN_NAME required; MIN_FREQ default 0.95)"
+    desc: "Render stage2_build.html for a pipeline run (RUN_DIR, RUN_NAME required; METADATA_FILE optional; MIN_FREQ default 0.95; SKIP_LARGE_PAIRWISE_PLOTS default false)"
     requires:
       vars: [RUN_DIR, RUN_NAME]
     vars:
       MIN_FREQ: '{{.MIN_FREQ | default "0.95"}}'
+      METADATA_FILE: '{{.METADATA_FILE | default ""}}'
+      SKIP_LARGE_PAIRWISE_PLOTS: '{{.SKIP_LARGE_PAIRWISE_PLOTS | default "false"}}'
     cmds:
       - mkdir -p "{{.RUN_DIR}}/notebooks"
       - |
@@ -43,6 +54,8 @@ tasks:
           -P build_dir:"{{.RUN_DIR}}/results/02_build" \
           -P run_name:"{{.RUN_NAME}}" \
           -P min_freq:"{{.MIN_FREQ}}" \
+          -P metadata_file:"{{.METADATA_FILE}}" \
+          -P skip_large_pairwise_plots:"{{.SKIP_LARGE_PAIRWISE_PLOTS}}" \
           --output-dir "{{.RUN_DIR}}/notebooks/"
 
   report:busco:
@@ -59,16 +72,18 @@ tasks:
           --output-dir "{{.RUN_DIR}}/notebooks/"
 
   report:all:
-    desc: "Render stage1 and stage2 reports for a run (RUN_DIR, RUN_NAME required; MIN_FREQ default 0.95)"
+    desc: "Render stage1 and stage2 reports for a run (RUN_DIR, RUN_NAME required; METADATA_FILE optional for stage1; MIN_FREQ default 0.95; SKIP_LARGE_PAIRWISE_PLOTS default false)"
     requires:
       vars: [RUN_DIR, RUN_NAME]
     vars:
       MIN_FREQ: '{{.MIN_FREQ | default "0.95"}}'
+      METADATA_FILE: '{{.METADATA_FILE | default ""}}'
+      SKIP_LARGE_PAIRWISE_PLOTS: '{{.SKIP_LARGE_PAIRWISE_PLOTS | default "false"}}'
     cmds:
       - task: report:stage1
-        vars: {RUN_DIR: '{{.RUN_DIR}}', RUN_NAME: '{{.RUN_NAME}}'}
+        vars: {RUN_DIR: '{{.RUN_DIR}}', RUN_NAME: '{{.RUN_NAME}}', METADATA_FILE: '{{.METADATA_FILE | default ""}}', SKIP_LARGE_PAIRWISE_PLOTS: '{{.SKIP_LARGE_PAIRWISE_PLOTS}}'}
       - task: report:stage2
-        vars: {RUN_DIR: '{{.RUN_DIR}}', RUN_NAME: '{{.RUN_NAME}}', MIN_FREQ: '{{.MIN_FREQ}}'}
+        vars: {RUN_DIR: '{{.RUN_DIR}}', RUN_NAME: '{{.RUN_NAME}}', MIN_FREQ: '{{.MIN_FREQ}}', METADATA_FILE: '{{.METADATA_FILE | default ""}}', SKIP_LARGE_PAIRWISE_PLOTS: '{{.SKIP_LARGE_PAIRWISE_PLOTS}}'}
 
   # ---------------------------------------------------------------------------
   # Tests

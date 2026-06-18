@@ -436,10 +436,20 @@ conda run -n quarto quarto render \
     -P results_dir:/absolute/path/to/run/results/01_explore \
     -P run_name:MyRun \
     -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
+    -P metadata_file:/absolute/path/to/run/genome_metadata.csv \
+    -P skip_large_pairwise_plots:true \
     --output-dir /absolute/path/to/run/notebooks/
 ```
 
 Quarto resolves `-P` paths relative to the **notebook file**, not the working directory, so absolute paths are required.
+Set `skip_large_pairwise_plots:true` for large cohorts to omit the pairwise ANI heatmap, SNP distance heatmap, and ANI-vs-SNP distance scatterplot.
+Set `metadata_file:/path/to/genome_metadata.csv` to add optional isolate/MAG styling throughout the Stage 1 report. The CSV must contain `sample` and `isolate` columns, where `isolate` is a boolean-like value. If the file is missing or not provided, the report renders as before.
+
+The same option is available through the Taskfile:
+
+```bash
+task report:stage1 RUN_DIR=/absolute/path/to/run RUN_NAME=MyRun METADATA_FILE=/absolute/path/to/run/genome_metadata.csv SKIP_LARGE_PAIRWISE_PLOTS=true
+```
 
 The report renders gracefully with partial results — FastANI, alignment, and Gubbins sections are skipped with an informational callout if those outputs are not yet present.
 
@@ -471,8 +481,16 @@ conda run -n quarto quarto render \
     -P build_dir:/absolute/path/to/run/results/02_build \
     -P run_name:MyRun \
     -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
+    -P metadata_file:/absolute/path/to/run/genome_metadata.csv \
     -P min_freq:0.95 \
+    -P skip_large_pairwise_plots:true \
     --output-dir /absolute/path/to/run/notebooks/
+```
+
+For large cohorts, the same Taskfile flag skips the Stage 2 pairwise ML distance heatmap:
+
+```bash
+task report:stage2 RUN_DIR=/absolute/path/to/run RUN_NAME=MyRun MIN_FREQ=0.95 METADATA_FILE=/absolute/path/to/run/genome_metadata.csv SKIP_LARGE_PAIRWISE_PLOTS=true
 ```
 
 | Parameter | Report | Description |
@@ -482,6 +500,8 @@ conda run -n quarto quarto render \
 | `build_dir` | stage 2 | Stage 2 results directory (`02_build`) — IQ-TREE trees and Gubbins stats |
 | `run_name` | both | Label shown in figure titles |
 | `highlights_file` | both | Path to highlights YAML (see above); omit to render without highlighting |
+| `metadata_file` | both | Optional genome metadata CSV with `sample` and `isolate` columns. Adds isolate/MAG colors, label prefixes, and compact-tree isolate ticks when present; missing files are ignored gracefully |
+| `skip_large_pairwise_plots` | both | Omit large pairwise plots; Stage 1 skips pairwise ANI/SNP heatmaps and ANI-vs-SNP scatterplot, Stage 2 skips the pairwise ML distance heatmap. Useful for large genome collections, e.g. >1000 genomes |
 | `min_freq` | stage 2 | The `--min-freq` value used for the final run |
 
 Rendered HTML files are self-contained (`embed-resources: true`) and can be shared without additional assets. Figures and tables are also saved to `results/<stage>/figs/stage<N>/` and `results/<stage>/tables/stage<N>/` respectively.

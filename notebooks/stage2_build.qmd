@@ -15,7 +15,9 @@ params:
   build_dir: "../results/02_build"
   run_name: "pipeline run"
   highlights_file: ""
+  metadata_file: ""
   min_freq: "0.95"
+  skip_large_pairwise_plots: false
 ---
 
 <!--
@@ -27,7 +29,9 @@ Render command (use absolute paths — Quarto resolves paths relative to the not
       -P build_dir:/absolute/path/to/run/results/02_build \
       -P run_name:MyRun \
       -P highlights_file:/absolute/path/to/subspecies-phylogeny/notebooks/highlights/MyRun.yml \
+      -P metadata_file:/absolute/path/to/run/genome_metadata.csv \
       -P min_freq:0.95 \
+      -P skip_large_pairwise_plots:false \
       --output-dir /absolute/path/to/run/notebooks/
 
 See notebooks/highlights/ for example highlights YAML files and their format.
@@ -48,7 +52,9 @@ explore_dir     = "../results/01_explore"
 build_dir       = "../results/02_build"
 run_name        = "pipeline run"
 highlights_file = ""
+metadata_file   = ""
 min_freq        = "0.95"
+skip_large_pairwise_plots = False
 ```
 
 ```{python}
@@ -77,6 +83,14 @@ explore_dir = Path(explore_dir)
 build_dir   = Path(build_dir)
 run_name    = str(run_name)
 min_freq    = str(min_freq).strip()
+
+def _as_bool(value):
+    """Parse Quarto -P boolean-ish values consistently."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+skip_large_pairwise_plots = _as_bool(skip_large_pairwise_plots)
 
 figs_dir   = build_dir / "figs"   / "stage4"
 tables_dir = build_dir / "tables" / "stage4"
@@ -108,6 +122,18 @@ PLOTLY_LAYOUT = dict(
     template='plotly_white',
     font=dict(family='Arial, sans-serif', size=13),
 )
+
+
+def display_note_callout(title, body_html):
+    display(HTML(
+        '<div class="callout callout-style-default callout-note callout-titled">'
+        '<div class="callout-header"><div class="callout-icon-container">'
+        '<i class="callout-icon"></i></div>'
+        f'<div class="callout-title-container flex-fill">{title}</div></div>'
+        '<div class="callout-body-container callout-body">'
+        f'{body_html}'
+        '</div></div>'
+    ))
 ```
 
 ```{python}
@@ -138,14 +164,113 @@ if _hf:
 DEFAULT_TIP_COLOR  = '#457b9d'
 DEFAULT_TIP_SIZE   = 5
 HIGHLIGHT_TIP_SIZE = 9
+METADATA_TIP_SIZE  = 7
+METADATA_STYLES = {
+    'isolate': {'label': 'Isolate', 'color': '#1b9e77', 'symbol': 'I'},
+    'MAG': {'label': 'MAG', 'color': '#7570b3', 'symbol': 'M'},
+}
+
+genome_metadata_classes = {}  # normalized sample name -> isolate|MAG
+genome_metadata_status = "not provided"
+genome_metadata_counts = {}
+
+
+def sample_key(name):
+    key = str(name).strip()
+    key = re.sub(r'\.(fa|fasta|fna)$', '', key, flags=re.IGNORECASE)
+    return re.sub(r'\.\d+$', '', key)
+
+
+def _class_from_isolate(value):
+    if pd.isna(value):
+        return None
+    return 'isolate' if _as_bool(value) else 'MAG'
+
+
+_mf_meta = str(metadata_file).strip()
+if _mf_meta:
+    _metadata_path = Path(_mf_meta)
+    if _metadata_path.exists():
+        try:
+            _metadata_df = pd.read_csv(_metadata_path)
+            _metadata_cols = {c.lower(): c for c in _metadata_df.columns}
+            if {'sample', 'isolate'}.issubset(_metadata_cols):
+                _sample_col = _metadata_cols['sample']
+                _isolate_col = _metadata_cols['isolate']
+                for _, _row in _metadata_df.iterrows():
+                    _cls = _class_from_isolate(_row[_isolate_col])
+                    if _cls:
+                        genome_metadata_classes[sample_key(_row[_sample_col])] = _cls
+                genome_metadata_counts = dict(
+                    pd.Series(list(genome_metadata_classes.values())).value_counts()
+                )
+                genome_metadata_status = (
+                    f"loaded {len(genome_metadata_classes)} sample annotations "
+                    f"from {_metadata_path}"
+                )
+            else:
+                genome_metadata_status = (
+                    f"ignored {_metadata_path} because it lacks sample/isolate columns"
+                )
+        except Exception as exc:
+            genome_metadata_status = f"ignored {_metadata_path}: {exc}"
+    else:
+        genome_metadata_status = f"not found: {_metadata_path}"
+
+
+def metadata_class(name):
+    return (
+        genome_metadata_classes.get(str(name).strip())
+        or genome_metadata_classes.get(sample_key(name))
+    )
+
+
+ref_name = None
+ref_name_source = "not found"
+
+
+def is_ref_sample(name):
+    return bool(
+        ref_name
+        and (
+            str(name).strip() == str(ref_name).strip()
+            or sample_key(name) == sample_key(ref_name)
+        )
+    )
 
 
 def tip_color(name):
-    return highlights[name]['color'] if name in highlights else DEFAULT_TIP_COLOR
+    if name in highlights:
+        return highlights[name]['color']
+    _cls = metadata_class(name)
+    if _cls:
+        return METADATA_STYLES[_cls]['color']
+    return DEFAULT_TIP_COLOR
 
 
 def tip_size(name):
-    return HIGHLIGHT_TIP_SIZE if name in highlights else DEFAULT_TIP_SIZE
+    if name in highlights:
+        return HIGHLIGHT_TIP_SIZE
+    if metadata_class(name):
+        return METADATA_TIP_SIZE
+    return DEFAULT_TIP_SIZE
+
+
+def sample_display_label(name, html=False, include_ref=True):
+    label = str(name)
+    prefix = []
+    if include_ref and is_ref_sample(name):
+        prefix.append('★')
+    _cls = metadata_class(name)
+    if _cls:
+        prefix.append(METADATA_STYLES[_cls]['symbol'])
+    text = f"{' '.join(prefix)} {label}".strip()
+    if html and _cls:
+        color = METADATA_STYLES[_cls]['color']
+        return f"<span style='color:{color}'>{text}</span>"
+    if html and name in highlights:
+        return f"<b>{text}</b>"
+    return text
 ```
 
 ```{python}
@@ -251,23 +376,79 @@ def _render_toytree(canvas):
     return html_io.getvalue().decode(), svg_io.getvalue().decode()
 
 
-def draw_toytree_with_support(tt, title=None, tip_font_size='10px', width=950):
+def draw_toytree_with_support(
+    tt,
+    title=None,
+    tip_font_size='10px',
+    width=950,
+    height=None,
+    show_tip_labels=True,
+    compact_highlight_ticks=False,
+):
     tips, tip_colors, _ = _tip_style_lists(tt)
     node_colors, node_sizes = _support_node_style(tt)
-    height = max(500, tt.ntips * 14)
+    height = height or max(500, tt.ntips * 14)
 
-    canvas, axes, _ = tt.draw(
+    draw_kwargs = dict(
         width=width, height=height,
         layout='r', scalebar=True,
-        tip_labels=True,
-        tip_labels_colors=tip_colors,
-        tip_labels_style={'font-size': tip_font_size},
+        tip_labels=show_tip_labels,
         node_sizes=node_sizes,
         node_colors=node_colors,
         node_style={'stroke': 'none'},
     )
+    if show_tip_labels:
+        draw_kwargs.update(
+            tip_labels_colors=tip_colors,
+            tip_labels_style={'font-size': tip_font_size},
+        )
+
+    canvas, axes, mark = tt.draw(**draw_kwargs)
     if title:
         axes.label.text = title
+    if compact_highlight_ticks:
+        _tip_y = {tip: float(i) for i, tip in enumerate(tips)}
+        _x_tip = float(np.nanmax(mark.ntable[:tt.ntips, 0]))
+        _x_min = float(np.nanmin(mark.ntable[:, 0]))
+        _x_span = max(_x_tip - _x_min, 1e-6)
+
+        def _draw_tick_group(names, color, start_mult, end_mult, stroke_width):
+            _ys = [_tip_y[n] for n in names if n in _tip_y]
+            if not _ys:
+                return
+            _x0 = _x_tip + _x_span * start_mult
+            _x1 = _x_tip + _x_span * end_mult
+            _xs = []
+            _yy = []
+            for _y in _ys:
+                _xs.extend([_x0, _x1, np.nan])
+                _yy.extend([_y, _y, np.nan])
+            axes.plot(
+                _xs,
+                _yy,
+                color=color,
+                stroke_width=stroke_width,
+                opacity=0.95,
+                style={'stroke-linecap': 'round'},
+            )
+
+        _isolates = [tip for tip in tips if metadata_class(tip) == 'isolate']
+        _draw_tick_group(
+            _isolates,
+            METADATA_STYLES['isolate']['color'],
+            start_mult=0.015,
+            end_mult=0.085,
+            stroke_width=2.2,
+        )
+        if ref_name:
+            _ref_ticks = [tip for tip in tips if is_ref_sample(tip)] or [ref_name]
+            _draw_tick_group(
+                _ref_ticks,
+                '#d62728',
+                start_mult=0.010,
+                end_mult=0.145,
+                stroke_width=4.0,
+            )
     return _render_toytree(canvas)
 ```
 
@@ -279,22 +460,98 @@ def draw_toytree_with_support(tt, title=None, tip_font_size='10px', width=950):
 tt_no_gubbins = tt_gubbins = None
 tt_no_gubbins_html = tt_no_gubbins_svg = ""
 tt_gubbins_html    = tt_gubbins_svg    = ""
+tt_no_gubbins_compact_html = tt_no_gubbins_compact_svg = ""
+tt_gubbins_compact_html    = tt_gubbins_compact_svg    = ""
 
 if (iqtree_no_gubbins_dir / "tree.treefile").exists():
     tt_no_gubbins = toytree.tree(str(iqtree_no_gubbins_dir / "tree.treefile")).ladderize()
+
+if HAS_GUBBINS_TREE:
+    tt_gubbins = toytree.tree(str(iqtree_gubbins_dir / "tree.treefile")).ladderize()
+
+_known_tree_names = []
+for _tree in [tt_no_gubbins, tt_gubbins]:
+    if _tree is not None:
+        _known_tree_names.extend(_tree.get_tip_labels())
+_known_tree_names = list(dict.fromkeys(_known_tree_names))
+
+_ref_fa = explore_dir / "ska2" / "map" / "reference.fa"
+if _ref_fa.exists():
+    with open(_ref_fa) as _fh:
+        _hdr = _fh.readline().strip().lstrip('>')
+    _ref_candidate = re.sub(r'\.fa(sta)?$', '', _hdr.split()[0])
+    _ref_matches = [
+        name for name in _known_tree_names
+        if name == _ref_candidate or sample_key(name) == sample_key(_ref_candidate)
+    ]
+    if _ref_matches:
+        ref_name = _ref_matches[0]
+        ref_name_source = "reference.fa"
+
+if ref_name is None:
+    _fastani_path = explore_dir / "fastani" / "fastani.txt"
+    if _fastani_path.exists():
+        _fastani_df = pd.read_csv(
+            _fastani_path,
+            sep='\t',
+            names=['query', 'ref', 'ani', 'mapped_kmers', 'total_kmers'],
+        )
+        for _col in ('query', 'ref'):
+            _fastani_df[_col] = _fastani_df[_col].str.replace(
+                r'\.fa(sta)?$', '', regex=True
+            )
+        _ani_matrix = _fastani_df.pivot_table(
+            index='query', columns='ref', values='ani', aggfunc='first'
+        )
+        _ani_samples = sorted(_fastani_df['query'].unique())
+        for _s in _ani_samples:
+            for _t in _ani_samples:
+                if pd.isna(_ani_matrix.loc[_s, _t]) and not pd.isna(_ani_matrix.loc[_t, _s]):
+                    _ani_matrix.loc[_s, _t] = _ani_matrix.loc[_t, _s]
+        _ani_matrix = _ani_matrix.reindex(index=_ani_samples, columns=_ani_samples)
+        _diag = _ani_matrix.copy().astype(float)
+        np.fill_diagonal(_diag.values, np.nan)
+        _medoid_candidate = _diag.mean(axis=1).idxmax()
+        _medoid_matches = [
+            name for name in _known_tree_names
+            if name == _medoid_candidate or sample_key(name) == sample_key(_medoid_candidate)
+        ]
+        ref_name = _medoid_matches[0] if _medoid_matches else _medoid_candidate
+        ref_name_source = "FastANI medoid"
+
+if tt_no_gubbins is not None:
     tt_no_gubbins_html, tt_no_gubbins_svg = draw_toytree_with_support(
         tt_no_gubbins,
         title=f"IQ-TREE ML — no Gubbins masking — {run_name} (min_freq={min_freq})"
     )
     save_tree(tt_no_gubbins_html, tt_no_gubbins_svg, "iqtree_no_gubbins")
+    tt_no_gubbins_compact_html, tt_no_gubbins_compact_svg = draw_toytree_with_support(
+        tt_no_gubbins,
+        title=f"IQ-TREE ML — no Gubbins masking, compact unlabeled view — {run_name} (min_freq={min_freq})",
+        height=1300,
+        show_tip_labels=False,
+        compact_highlight_ticks=True,
+    )
+    save_tree(
+        tt_no_gubbins_compact_html,
+        tt_no_gubbins_compact_svg,
+        "iqtree_no_gubbins_compact",
+    )
 
-if HAS_GUBBINS_TREE:
-    tt_gubbins = toytree.tree(str(iqtree_gubbins_dir / "tree.treefile")).ladderize()
+if tt_gubbins is not None:
     tt_gubbins_html, tt_gubbins_svg = draw_toytree_with_support(
         tt_gubbins,
         title=f"IQ-TREE ML — Gubbins-masked — {run_name} (min_freq={min_freq})"
     )
     save_tree(tt_gubbins_html, tt_gubbins_svg, "iqtree_gubbins")
+    tt_gubbins_compact_html, tt_gubbins_compact_svg = draw_toytree_with_support(
+        tt_gubbins,
+        title=f"IQ-TREE ML — Gubbins-masked, compact unlabeled view — {run_name} (min_freq={min_freq})",
+        height=1300,
+        show_tip_labels=False,
+        compact_highlight_ticks=True,
+    )
+    save_tree(tt_gubbins_compact_html, tt_gubbins_compact_svg, "iqtree_gubbins_compact")
 ```
 
 ```{python}
@@ -318,6 +575,10 @@ rows = [
     ("Tree length",            no_gubbins_meta.get('tree_length', '—')),
     ("Gubbins recomb. blocks", str(n_recomb_blocks) if HAS_GUBBINS_OUT else "not run"),
     ("Gubbins-masked IQ-TREE", "yes" if HAS_GUBBINS_TREE else "no / not run"),
+    ("Skip large pairwise plots", skip_large_pairwise_plots),
+    ("Reference highlight",     ref_name if ref_name else "not found"),
+    ("Reference highlight source", ref_name_source),
+    ("Genome metadata",         genome_metadata_status),
     ("Highlighted strains",    highlight_summary),
 ]
 summary_df = pd.DataFrame(rows, columns=["Parameter", "Value"])
@@ -374,6 +635,7 @@ if gubbins_stats is not None and len(gubbins_stats) > 0:
     gs = gubbins_stats.sort_values('Total SNPs', ascending=True)
     tip_names  = gs['Node'].tolist()
     bar_colors = [tip_color(t) for t in tip_names]
+    tip_labels = [sample_display_label(t) for t in tip_names]
 
     fig_gubbins = make_subplots(
         rows=1, cols=2,
@@ -381,14 +643,16 @@ if gubbins_stats is not None and len(gubbins_stats) > 0:
         horizontal_spacing=0.12,
     )
     fig_gubbins.add_trace(go.Bar(
-        y=tip_names, x=gs['Total SNPs'],
+        y=tip_labels, x=gs['Total SNPs'],
         orientation='h', marker_color=bar_colors, name='Total SNPs',
-        hovertemplate='%{y}<br>Total SNPs: %{x}<extra></extra>',
+        customdata=tip_names,
+        hovertemplate='%{customdata}<br>Total SNPs: %{x}<extra></extra>',
     ), row=1, col=1)
     fig_gubbins.add_trace(go.Bar(
-        y=tip_names, x=gs['Number of SNPs Inside Recombinations'],
+        y=tip_labels, x=gs['Number of SNPs Inside Recombinations'],
         orientation='h', marker_color=bar_colors, name='SNPs in recombinations',
-        hovertemplate='%{y}<br>SNPs in recomb: %{x}<extra></extra>',
+        customdata=tip_names,
+        hovertemplate='%{customdata}<br>SNPs in recomb: %{x}<extra></extra>',
     ), row=1, col=2)
     fig_gubbins.update_layout(
         height=max(500, len(gs) * 14),
@@ -408,7 +672,7 @@ if gubbins_stats is not None and len(gubbins_stats) > 0:
 # Pairwise ML distance heatmap
 # ============================================================
 fig_dist = None
-if (iqtree_no_gubbins_dir / "tree.mldist").exists():
+if not skip_large_pairwise_plots and (iqtree_no_gubbins_dir / "tree.mldist").exists():
     dist_df = pd.read_csv(
         iqtree_no_gubbins_dir / "tree.mldist",
         sep=r'\s+', header=None, skiprows=1, index_col=0,
@@ -423,8 +687,8 @@ if (iqtree_no_gubbins_dir / "tree.mldist").exists():
     tip_names   = list(dist_df.index)
     text_matrix = [[f"Query: {r}<br>Ref: {c}<br>Dist: {dist_df.loc[r,c]:.6f}"
                     for c in tip_names] for r in tip_names]
-    ticktext_x  = [f"<b>{t}</b>" if t in highlights else t for t in tip_names]
-    ticktext_y  = [f"<b>{t}</b>" if t in highlights else t for t in tip_names]
+    ticktext_x  = [sample_display_label(t, html=True) for t in tip_names]
+    ticktext_y  = [sample_display_label(t, html=True) for t in tip_names]
 
     fig_dist = go.Figure(go.Heatmap(
         z=dist_df.values, x=tip_names, y=tip_names,
@@ -467,12 +731,30 @@ if highlights:
                  f'<tbody>{rows_hl}</tbody></table>'))
 else:
     display(HTML("<em>None — pass <code>-P highlights_file:/path/to/highlights.yml</code> to mark strains.</em>"))
+
+if genome_metadata_classes:
+    rows_meta = "".join(
+        f'<tr><td><span style="color:{style["color"]};font-weight:bold">{style["symbol"]}</span></td>'
+        f'<td>{style["label"]}</td><td>{genome_metadata_counts.get(cls, 0)}</td>'
+        f'<td><span style="color:{style["color"]};font-weight:bold">■</span></td></tr>'
+        for cls, style in METADATA_STYLES.items()
+    )
+    display(HTML(
+        '<p><strong>Genome metadata legend</strong></p>'
+        '<table class="table table-sm" style="width:auto">'
+        '<thead><tr><th>Prefix</th><th>Class</th><th>Samples</th><th>Colour</th></tr></thead>'
+        f'<tbody>{rows_meta}</tbody></table>'
+    ))
 ```
 
 Bootstrap support on internal nodes:
 <span style="color:#2d6a4f; font-weight:bold">■ ≥95</span> &nbsp;
 <span style="color:#f4a261; font-weight:bold">■ ≥70</span> &nbsp;
 <span style="color:#aaaaaa">■ &lt;70 (not shown)</span>
+
+Compact tree right-side ticks:
+<span style="color:#1b9e77; font-weight:bold">■ isolates</span> &nbsp;
+<span style="color:#d62728; font-weight:bold">■ FastANI medoid</span>
 :::
 
 ## 1. IQ-TREE ML phylogeny — no recombination masking
@@ -481,6 +763,11 @@ Bootstrap support on internal nodes:
 #| echo: false
 if tt_no_gubbins is not None:
     display(HTML(tt_no_gubbins_html))
+    display(HTML(
+        "<p><strong>Compact unlabeled IQ-TREE ML phylogeny — no recombination masking</strong><br>"
+        "Right-side ticks mark isolates in green and the FastANI medoid in red.</p>"
+    ))
+    display(HTML(tt_no_gubbins_compact_html))
 else:
     display(HTML(f"<p><em>No IQ-TREE treefile found for min_freq={min_freq} (no_gubbins track).</em></p>"))
 ```
@@ -491,6 +778,11 @@ else:
 #| echo: false
 if HAS_GUBBINS_TREE and tt_gubbins is not None:
     display(HTML(tt_gubbins_html))
+    display(HTML(
+        "<p><strong>Compact unlabeled IQ-TREE ML phylogeny — Gubbins-masked</strong><br>"
+        "Right-side ticks mark isolates in green and the FastANI medoid in red.</p>"
+    ))
+    display(HTML(tt_gubbins_compact_html))
 elif HAS_GUBBINS_OUT and not HAS_GUBBINS_TREE:
     display(HTML("""
     <div class="callout callout-style-default callout-note callout-titled">
@@ -529,7 +821,13 @@ Heatmap of IQ-TREE pairwise maximum-likelihood distances (`tree.mldist`), ordere
 
 ```{python}
 #| echo: false
-if fig_dist is not None:
+if skip_large_pairwise_plots:
+    display_note_callout(
+        "Large pairwise plot skipped",
+        "<p>The Pairwise IQ-TREE ML distance heatmap was skipped because "
+        "<code>skip_large_pairwise_plots</code> is enabled.</p>"
+    )
+elif fig_dist is not None:
     fig_dist.show()
 else:
     display(HTML("<p><em>No <code>tree.mldist</code> file found.</em></p>"))
