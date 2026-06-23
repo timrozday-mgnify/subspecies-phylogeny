@@ -60,7 +60,7 @@ workflow SKA2_SHARDED_MERGE {
         ch_versions = ch_versions.mix(SKA2_WEED_SHARD.out.versions.first())
 
         ch_for_concat = SKA2_WEED_SHARD.out.skf
-            .map { meta, skf -> skf }
+            .map { meta, skf, n_kmers -> skf }
             .collect()
     } else {
         ch_for_concat = SKA2_MERGE_SHARD.out.skf.collect()

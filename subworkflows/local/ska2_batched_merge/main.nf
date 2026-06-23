@@ -57,7 +57,7 @@ workflow SKA2_BATCHED_MERGE {
         ch_versions = ch_versions.mix(SKA2_WEED_BATCH.out.versions.first())
 
         ch_for_final = SKA2_WEED_BATCH.out.skf
-            .map { meta, skf -> skf }
+            .map { meta, skf, n_kmers -> skf }
             .collect()
     } else {
         ch_for_final = SKA2_MERGE_BATCH.out.skf.collect()

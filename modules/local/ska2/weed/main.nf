@@ -11,8 +11,8 @@ process SKA2_WEED {
     tuple val(meta), path(merged_skf)
 
     output:
-    tuple val(meta), path("${prefix}.skf"), emit: skf
-    path "versions.yml",                    emit: versions
+    tuple val(meta), path("${prefix}.skf"), path("${prefix}.nkmers.txt"), emit: skf
+    path "versions.yml",                                                 emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -28,6 +28,10 @@ process SKA2_WEED {
         -o ${prefix}.skf \\
         ${merged_skf}
 
+    # A min-freq close to 1 can weed out every k-mer, leaving an unusable SKF;
+    # surface the count so the workflow can filter the branch before ska map.
+    ska nk ${prefix}.skf | sed -n 's/^k-mers=//p' > ${prefix}.nkmers.txt
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         ska2: \$(ska --version 2>&1 | sed 's/ska //')
@@ -38,6 +42,7 @@ process SKA2_WEED {
     prefix = task.ext.prefix ?: "weeded_${meta.id}"
     """
     touch ${prefix}.skf
+    echo 1 > ${prefix}.nkmers.txt
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

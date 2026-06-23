@@ -213,10 +213,25 @@ workflow SUBSPECIES_PHYLOGENY {
             SKA2_WEED(ch_weed_input)
             ch_versions = ch_versions.mix(SKA2_WEED.out.versions.first())
 
+            // A high enough --min-freq can weed out every k-mer, leaving an SKF
+            // with no SNPs that would otherwise crash ska map / Gubbins downstream.
+            ch_weeded_skf = SKA2_WEED.out.skf
+                .filter { meta, skf, nkmers_file ->
+                    def keep = nkmers_file.text.trim().toInteger() >= 10
+                    if (!keep) {
+                        log.warn(
+                            "Skipping ska map/Gubbins for min_freq=${meta.min_freq}: " +
+                            "After ska weed there are too few SNPs to map (<10 remaining)."
+                        )
+                    }
+                    keep
+                }
+                .map { meta, skf, nkmers_file -> [ meta, skf ] }
+
             // Pair each weeded SKF with the reference. When ch_ska_map_ref is
             // empty (ska_merged_skf mode without --ska_map_reference), the
             // combine produces no items and SKA2_MAP / GUBBINS simply never run.
-            ch_map_input = SKA2_WEED.out.skf
+            ch_map_input = ch_weeded_skf
                 .combine(ch_ska_map_ref)
                 .map { meta, skf, ref -> [ meta, ref, skf ] }
 
