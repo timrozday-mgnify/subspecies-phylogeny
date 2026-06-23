@@ -55,6 +55,74 @@ nextflow_process {
         }
     }
 
+    test("three Bacteroides uniformis genomes - multi-batch fold (batch_size=2)") {
+        // Regression test for the xargs-auto-split overwrite bug: with
+        // ext.merge_batch_size=2 (set in ./nextflow.config) and 3 input SKFs, the
+        // module must take the chunk-and-fold branch (merge batch 1, then fold
+        // batch 2 into the accumulator) rather than relying on a single
+        // unprotected `ska merge` invocation. The old code would have run this
+        // case via one `xargs` call too (3 files easily fit on one command
+        // line), so this doesn't reproduce the bug's exact trigger condition
+        // (which needed enough files to force xargs's own auto-split) — but it
+        // does exercise the new fold logic itself for a crash/regression check.
+        setup {
+            run("SKA2_BUILD", alias: "BUILD_1") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_2") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_909' ],
+                        file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_3") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_AN67' ],
+                        file(params.test_data_base + 'BU_AN67_NT5182.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+        }
+        when {
+            process {
+                """
+                input[0] = BUILD_1.out.skf.mix(BUILD_2.out.skf).mix(BUILD_3.out.skf)
+                    .map { meta, skf -> skf }
+                    .collect()
+                """
+            }
+            config "./nextflow.config"
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.skf.size() == 1 },
+                { assert path(process.out.skf.get(0)).exists() },
+                { assert path(process.out.skf.get(0)).size() > 0 },
+                { assert snapshot(
+                    process.out.findAll { key, val -> key.startsWith("versions") }
+                ).match() }
+            )
+        }
+    }
+
     test("two Bacteroides uniformis genomes - stub") {
         options "-stub"
         when {

@@ -1,4 +1,18 @@
 {
+    "three Bacteroides uniformis genomes - multi-batch fold (batch_size=2)": {
+        "content": [
+            {
+                "versions": [
+                    "versions.yml:md5,9169e885bdee04c116c9193a7be7a6aa"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-23T08:10:20.596047",
+        "meta": {
+            "nf-test": "0.9.4",
+            "nextflow": "26.04.1"
+        }
+    },
     "two Bacteroides uniformis genomes - stub": {
         "content": [
             {

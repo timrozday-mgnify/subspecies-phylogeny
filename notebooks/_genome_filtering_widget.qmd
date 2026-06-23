@@ -1,0 +1,283 @@
+<!--
+Observable JS (OJS) partial, spliced into stage1_explore.qmd via
+{{< include _genome_filtering_widget.qmd >}}.
+
+Kept in its own file purely for readability/maintainability of the widget
+logic — `{{< include >}}` is a textual/preprocessing splice (not a runtime
+JS module import), so this is fully compatible with stage1_explore.qmd's
+`embed-resources: true` self-contained HTML output.
+
+Expects three OJS-defined inputs from the including document (set via
+Python's `ojs_define()`):
+  - criteria_records   : list[dict] — one row per genome (see §5 data-prep cell)
+  - suggested_thresholds: dict — default cutoffs for each criterion
+  - min_freq_options    : list[float] — tested --min-freq values
+-->
+
+```{ojs}
+//| echo: false
+// criteria_records is already row-oriented (Python sent a list of per-sample
+// dicts via ojs_define), so no transpose() is needed here — that helper is
+// only for the column-oriented {col: [...]} shape Quarto produces when you
+// hand ojs_define() a raw DataFrame directly.
+data = criteria_records
+```
+
+```{ojs}
+//| echo: false
+viewof minFreq = Inputs.select(min_freq_options, {
+  label: "SNP coverage: --min-freq",
+  value: suggested_thresholds.default_min_freq,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxMissingPct = Inputs.range([0, 100], {
+  label: "Max missing data (%) at chosen min-freq",
+  step: 0.5,
+  value: suggested_thresholds.max_missing_pct,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof minCheckmComplete = Inputs.range([0, 100], {
+  label: "Min CheckM2/CheckM completeness (%)",
+  step: 1,
+  value: suggested_thresholds.checkm_min_completeness,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxCheckmContam = Inputs.range([0, 100], {
+  label: "Max CheckM2/CheckM contamination (%)",
+  step: 0.5,
+  value: suggested_thresholds.checkm_max_contamination,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof requireGuncPass = Inputs.checkbox(["Require GUNC pass"], {
+  value: suggested_thresholds.require_gunc_pass ? ["Require GUNC pass"] : [],
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxGuncCss = Inputs.range([0, 1], {
+  label: "Max GUNC clade separation score",
+  step: 0.01,
+  value: suggested_thresholds.max_gunc_css,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof minBuscoComplete = Inputs.range([0, 100], {
+  label: "Min BUSCO completeness (C, %)",
+  step: 1,
+  value: suggested_thresholds.busco_min_completeness,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof minBuscoSingle = Inputs.range([0, 100], {
+  label: "Min BUSCO single-copy (S, %)",
+  step: 1,
+  value: suggested_thresholds.busco_min_single,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxBuscoDuplicated = Inputs.range([0, 100], {
+  label: "Max BUSCO duplicated (D, %)",
+  step: 1,
+  value: suggested_thresholds.busco_max_duplicated,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxBuscoFragmented = Inputs.range([0, 100], {
+  label: "Max BUSCO fragmented (F, %)",
+  step: 1,
+  value: suggested_thresholds.busco_max_fragmented,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxBuscoMissing = Inputs.range([0, 100], {
+  label: "Max BUSCO missing (M, %)",
+  step: 1,
+  value: suggested_thresholds.busco_max_missing,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxMagpurifyFlagged = Inputs.range([0, 50], {
+  label: "Max MAGpurify flagged contigs (gc-content + tetra-freq + phylo-markers)",
+  step: 1,
+  value: suggested_thresholds.max_magpurify_flagged,
+})
+```
+
+```{ojs}
+//| echo: false
+viewof maxSizeZ = Inputs.range([0, 6], {
+  label: "Max |genome-size z-score|",
+  step: 0.1,
+  value: suggested_thresholds.max_size_zscore,
+})
+```
+
+```{ojs}
+//| echo: false
+// One row per genome, tagged with which active criteria it fails (if any).
+evaluated = data.map((d) => {
+  const reasons = [];
+  // Numeric match, not a string-interpolated key lookup: JS's default Number-to-string
+  // drops trailing ".0" (minFreq=1 -> "1") while Python's f-string keeps it
+  // ("missing_pct_1.0"), so a `missing_pct_${minFreq}` key would silently never match
+  // for whole-number min_freq values.
+  const missingEntry = d.missing_by_freq.find((m) => m.min_freq === minFreq);
+  const missingVal = missingEntry ? missingEntry.missing_pct : null;
+
+  if (d.checkm2_completeness != null && d.checkm2_completeness < minCheckmComplete) {
+    reasons.push(`completeness ${d.checkm2_completeness}% < ${minCheckmComplete}%`);
+  }
+  if (d.checkm2_contamination != null && d.checkm2_contamination > maxCheckmContam) {
+    reasons.push(`contamination ${d.checkm2_contamination}% > ${maxCheckmContam}%`);
+  }
+  if (requireGuncPass.length > 0 && d.gunc_pass === false) {
+    reasons.push("GUNC fail");
+  }
+  if (d.gunc_css != null && d.gunc_css > maxGuncCss) {
+    reasons.push(`GUNC CSS ${d.gunc_css} > ${maxGuncCss}`);
+  }
+  if (d.busco_completeness != null && d.busco_completeness < minBuscoComplete) {
+    reasons.push(`BUSCO C ${d.busco_completeness}% < ${minBuscoComplete}%`);
+  }
+  if (d.busco_single != null && d.busco_single < minBuscoSingle) {
+    reasons.push(`BUSCO S ${d.busco_single}% < ${minBuscoSingle}%`);
+  }
+  if (d.busco_duplicated != null && d.busco_duplicated > maxBuscoDuplicated) {
+    reasons.push(`BUSCO D ${d.busco_duplicated}% > ${maxBuscoDuplicated}%`);
+  }
+  if (d.busco_fragmented != null && d.busco_fragmented > maxBuscoFragmented) {
+    reasons.push(`BUSCO F ${d.busco_fragmented}% > ${maxBuscoFragmented}%`);
+  }
+  if (d.busco_missing != null && d.busco_missing > maxBuscoMissing) {
+    reasons.push(`BUSCO M ${d.busco_missing}% > ${maxBuscoMissing}%`);
+  }
+  if (d.magpurify_flagged_total != null && d.magpurify_flagged_total > maxMagpurifyFlagged) {
+    reasons.push(`MAGpurify flagged ${d.magpurify_flagged_total} > ${maxMagpurifyFlagged}`);
+  }
+  if (d.genome_size_z != null && Math.abs(d.genome_size_z) > maxSizeZ) {
+    reasons.push(`genome-size z=${d.genome_size_z}`);
+  }
+  if (missingVal != null && missingVal > maxMissingPct) {
+    reasons.push(`missing ${missingVal}% > ${maxMissingPct}% (min_freq=${minFreq})`);
+  }
+
+  return { ...d, missing_pct_selected: missingVal, fail_reasons: reasons, n_failed: reasons.length };
+})
+
+excluded = evaluated.filter((d) => d.n_failed > 0)
+```
+
+### Live results
+
+```{ojs}
+//| echo: false
+md`**${excluded.length}** of **${data.length}** genomes flagged for exclusion at the current thresholds
+(${data.filter((d) => d.in_alignment).length} of those ${data.length} are already in the current SKA
+alignment; the rest have QC data only and have not yet been built into it).`
+```
+
+```{ojs}
+//| echo: false
+Inputs.table(
+  excluded.map((d) => ({
+    Sample: d.sample_id,
+    "In alignment": d.in_alignment,
+    Class: d.class,
+    "Completeness (%)": d.checkm2_completeness,
+    "Contamination (%)": d.checkm2_contamination,
+    "GUNC pass": d.gunc_pass,
+    "GUNC CSS": d.gunc_css,
+    "BUSCO C/S/D/F/M (%)": [d.busco_completeness, d.busco_single, d.busco_duplicated, d.busco_fragmented, d.busco_missing]
+      .map((v) => (v == null ? "–" : v))
+      .join(" / "),
+    "MAGpurify flagged": d.magpurify_flagged_total,
+    "Size z-score": d.genome_size_z,
+    [`Missing % (min_freq=${minFreq})`]: d.missing_pct_selected,
+    "Failed criteria": d.fail_reasons.join("; "),
+  })),
+  { width: { "Failed criteria": 350, "BUSCO C/S/D/F/M (%)": 160 } }
+)
+```
+
+```{ojs}
+//| echo: false
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+exportExcludeListButton = {
+  const btn = html`<button>⬇ Download exclude_list.txt (${excluded.length} genomes)</button>`;
+  btn.onclick = () => {
+    const text = excluded.map((d) => d.sample_id).join("\n") + (excluded.length ? "\n" : "");
+    downloadText("exclude_list.txt", text);
+  };
+  return btn;
+}
+```
+
+```{ojs}
+//| echo: false
+function toCsvRow(values) {
+  return values
+    .map((v) => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    })
+    .join(",");
+}
+
+exportCandidatesCsvButton = {
+  const btn = html`<button>⬇ Download exclude_candidates.csv (with reasons)</button>`;
+  btn.onclick = () => {
+    const header = toCsvRow(["sample", "in_alignment", "class", "n_failed", "fail_reasons"]);
+    const rows = excluded.map((d) =>
+      toCsvRow([d.sample_id, d.in_alignment, d.class, d.n_failed, d.fail_reasons.join("; ")])
+    );
+    downloadText("exclude_candidates.csv", [header, ...rows].join("\n") + "\n");
+  };
+  return btn;
+}
+```
+
+```{ojs}
+//| echo: false
+html`<div style="display:flex; gap:1rem; margin-top:0.5rem;">${exportExcludeListButton}${exportCandidatesCsvButton}</div>`
+```
+
+`exclude_list.txt` contains one genome identifier per line (matching the `sample` column
+of the `--input` samplesheet). For genomes **already in the alignment** (`In alignment` =
+true above), this name also matches the one embedded in the merged SKF, so the file can be
+passed directly via `--ska_delete_samples`. For genomes **not yet built into the alignment**
+(QC-only candidates), there's nothing yet to delete from a SKF — instead, drop the
+corresponding rows from the `--input` samplesheet before the run that builds/extends the
+alignment.

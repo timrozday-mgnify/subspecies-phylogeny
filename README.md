@@ -101,13 +101,21 @@ nextflow run main.nf -profile docker \
 |---|---|
 | CheckM2 completeness < 90 % or contamination > 5 % | Remove genome |
 | GUNC maxCSS > 0.45 | Chimeric — inspect and consider removing |
+| BUSCO completeness (C) < 90 % | Incomplete assembly — review |
 | FastANI ANI < 95 % to cohort median | Wrong species — remove |
 | Unusually high contig count (QUAST) | Fragmented assembly — review |
+| Genome size an outlier (> 2 SD from cohort mean) | Review — possible misassembly or wrong species |
 | Alignment length drops steeply above a threshold | Choose that threshold |
+| Sample has high missing data (> 10 %) at the chosen `--min-freq` | Remove genome |
 
-To remove problem genomes: add their FASTA basenames (without `.fa`/`.fasta`)
-to a plain-text file (one per line) and uncomment `ska_delete_samples` in
-`params.yml`. Confirm exact names with `ska nk results/01_explore/ska2/merged.skf`.
+**To remove problem genomes**, use §5 ("Interactive genome filtering & exclude
+list") of the stage 1 Explore report — it combines all of the signals above
+into one filterable table and produces a ready-to-use `exclude_list.txt`
+download. Pass that file directly via `ska_delete_samples` in `params.yml`.
+(Manual fallback: build the list yourself — add the names shown in the
+report's §5 table, one per line, to a plain-text file. These names are
+already in the format embedded in the merged SKF; confirm with `ska nk
+results/01_explore/ska2/merged.skf` if in doubt.)
 
 **Activate database-dependent QC tools** by uncommenting their paths in `params.yml`
 (see [Reference databases](#reference-databases)):

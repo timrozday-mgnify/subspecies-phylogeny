@@ -450,6 +450,42 @@ if _mag_base and _mag_base.exists():
         _mag_rows.append(_row)
 magpurify_qc_df = pd.DataFrame(_mag_rows) if _mag_rows else pd.DataFrame()
 
+# BUSCO: short_summary.{type}.{lineage}.{sample}-busco.txt under qc/busco/<sample>/
+# (same regex parsing as notebooks/stage1_busco.qmd's parse_short_summary)
+def _parse_busco_short_summary(path):
+    text = path.read_text()
+    def _int(pattern):
+        m = re.search(pattern, text)
+        return int(m.group(1)) if m else 0
+    total = _int(r'(\d+)\s+Total BUSCO groups searched')
+    c = _int(r'(\d+)\s+Complete BUSCOs \(C\)')
+    s = _int(r'(\d+)\s+Complete and single-copy BUSCOs \(S\)')
+    d = _int(r'(\d+)\s+Complete and duplicated BUSCOs \(D\)')
+    f = _int(r'(\d+)\s+Fragmented BUSCOs \(F\)')
+    m = _int(r'(\d+)\s+Missing BUSCOs \(M\)')
+    return dict(
+        C=round(100 * c / total, 1) if total else np.nan,
+        S=round(100 * s / total, 1) if total else np.nan,
+        D=round(100 * d / total, 1) if total else np.nan,
+        F=round(100 * f / total, 1) if total else np.nan,
+        M=round(100 * m / total, 1) if total else np.nan,
+        n_busco_groups=total,
+    )
+
+_busco_rows = []
+_busco_base = (qc_dir_path / "qc/busco") if qc_dir_path else None
+if _busco_base and _busco_base.exists():
+    for _d in sorted(_busco_base.iterdir()):
+        _summaries = list(_d.glob("short_summary.*.txt"))
+        if _summaries:
+            try:
+                _row = {'Sample': _d.name}
+                _row.update(_parse_busco_short_summary(_summaries[0]))
+                _busco_rows.append(_row)
+            except Exception:
+                pass
+busco_df = pd.DataFrame(_busco_rows) if _busco_rows else pd.DataFrame()
+
 # Build combined QC summary table
 _qc_key_cols = []
 _qc_parts = []
@@ -484,6 +520,11 @@ if not magpurify_qc_df.empty:
         'phylo-markers_flagged':'MAGp phylo flag',
     }).set_index('Sample')
     _qc_parts.append(_mp)
+if not busco_df.empty:
+    _bc = busco_df[['Sample', 'C', 'S', 'D', 'F', 'M']].copy()
+    _bc.columns = ['Sample', 'BUSCO Complete (%)', 'BUSCO Single (%)',
+                   'BUSCO Dup (%)', 'BUSCO Frag (%)', 'BUSCO Missing (%)']
+    _qc_parts.append(_bc.set_index('Sample'))
 
 qc_summary_df = pd.concat(_qc_parts, axis=1).reset_index().rename(columns={'index': 'Sample'}) \
     if _qc_parts else pd.DataFrame()
@@ -747,7 +788,7 @@ else:
         '<i class="callout-icon"></i></div>'
         '<div class="callout-title-container flex-fill">No QC results found</div></div>'
         '<div class="callout-body-container callout-body">'
-        f'<p>No QC output (CheckM2, GUNC, QUAST, MAGpurify) found under '
+        f'<p>No QC output (CheckM2, GUNC, QUAST, MAGpurify, BUSCO) found under '
         f'<code>{qc_dir_path.resolve()}/qc/</code>. '
         'This section will populate once stage 0 QC has run.</p>'
         '</div></div>'
@@ -760,8 +801,13 @@ else:
 - **CheckM2 / CheckM completeness** < 90 % → consider excluding (insufficient marker coverage)
 - **CheckM2 / CheckM contamination** > 5 % → consider excluding (likely mixed bin)
 - **GUNC `pass.GUNC`** = False → chimeric genome; inspect further
+- **BUSCO completeness (C)** < 90 % → consider excluding (incomplete assembly)
 - **QUAST `# contigs`** >> cohort median → fragmented assembly; may inflate missing data
 - **MAGpurify** flagged contigs → review individually; rarely a hard exclusion criterion
+
+See §5 below for an interactive tool that combines these criteria (plus
+genome-size outliers and SNP-alignment coverage) into one filterable table
+with a downloadable exclude list.
 :::
 
 ### 0.1 Summary table
@@ -2151,6 +2197,225 @@ if not recomb_df.empty and 'Genome Length' in recomb_df.columns:
 else:
     display(Markdown('> No Gubbins per-branch statistics — genome-length check unavailable.'))
 ```
+
+## 5. Interactive genome filtering & exclude list
+
+The table below combines every per-genome QC signal collected above — CheckM2/CheckM
+completeness & contamination, GUNC chimerism & clade separation score, BUSCO
+completeness/single/duplicated/fragmented/missing, MAGpurify flagged contigs, assembly
+size, and SNP-alignment coverage (missing data) at each tested `--min-freq` — into one row
+per genome. The row universe is **every genome with QC data**, not only genomes already
+built into the SKA alignment — QC commonly runs ahead of, and across a larger candidate
+set than, the alignment (e.g. while screening additional genomes not yet incorporated).
+Each row is flagged `In alignment` accordingly. Adjust the thresholds in the live widget
+to explore different filtering strategies, then download an exclude list: for genomes
+already in the alignment this is usable directly via `--ska_delete_samples`; for QC-only
+candidates, remove them from the `--input` samplesheet instead before the run that
+builds/extends the alignment.
+
+::: {.callout-tip}
+**Suggested default thresholds** (adjustable in the widget below):
+
+- **CheckM2 / CheckM completeness** ≥ 90 %, **contamination** ≤ 5 % — MIMAG
+  high-quality draft genome standard (Bowers et al. 2017, *Nat. Biotechnol.*)
+- **GUNC** `pass.GUNC` and/or clade separation score ≤ 0.45 — GUNC's published cutoff
+  (Orakov et al. 2021, *Genome Biology*); both the boolean pass/fail and the raw score
+  are adjustable independently, since the score is a continuous signal and you may want
+  a stricter cutoff than GUNC's own default
+- **BUSCO completeness (C)** ≥ 90 %, **single-copy (S)** ≥ 80 %, **duplicated (D)** ≤ 10 %,
+  **fragmented (F)** ≤ 10 %, **missing (M)** ≤ 10 % — common practical cutoffs for
+  near-complete, non-redundant assemblies (no single literature-mandated values for
+  S/D/F/M; treat as soft guidelines — high D often flags contamination/redundant
+  haplotigs, high F/M flags incompleteness)
+- **MAGpurify flagged contigs** (gc-content + tetra-freq + phylo-markers combined) ≤ 5 —
+  MAGpurify itself ships no fixed cutoff; per this pipeline's README, flagged contigs are
+  "rarely a hard exclusion criterion" on their own — review the contigs before excluding
+  based on this alone. Only contig **counts** are available here, not finer-grained
+  per-contig scores — the pipeline doesn't publish MAGpurify's intermediate per-contig
+  numeric distances/scores (see `conf/modules.config`, `MAGPURIFY` block), only the final
+  flagged-contig lists, to avoid retaining large intermediate gene/HMM files
+- **Genome size**: |z| > 2 SD from the cohort mean assembly length — same
+  statistical convention as the alignment-length check in §4.7 (a different,
+  complementary signal — §4.7 flags reference-coordinate alignment span, this
+  flags raw assembly size from QUAST)
+- **SNP-alignment missing data**: ≤ 10 % missing (gaps + N) at the chosen
+  `--min-freq` — same threshold drawn as a line in §4.2
+:::
+
+```{python}
+#| include: false
+# ============================================================
+# §5 data prep — combine QC + SNP-coverage + genome-size outliers
+# into one per-sample table. Row universe is the UNION of every QC tool's
+# samples and the SKA alignment's samples — QC commonly runs ahead of (and on
+# a larger candidate set than) the alignment, e.g. while screening additional
+# genomes not yet built into the SKA tree, so scoping rows to only
+# _diag_order (alignment-derived names) would silently drop QC-only genomes
+# from the filtering table.
+# ============================================================
+
+def _qc_lookup(df, name_col, value_col):
+    """sample_key(name) -> value, for one column of a QC dataframe."""
+    if df.empty or name_col not in df.columns or value_col not in df.columns:
+        return {}
+    return {sample_key(n): v for n, v in zip(df[name_col], df[value_col])}
+
+def _qc_names(df, name_col):
+    """sample_key(name) -> original name string, for one column of a QC dataframe."""
+    if df.empty or name_col not in df.columns:
+        return {}
+    return {sample_key(n): n for n in df[name_col]}
+
+# Canonical display name per sample_key, preferring the SKA/alignment spelling
+# (verified exact match to the SKF) where available, else any QC tool's name.
+_name_by_key = {}
+for _df, _col in (
+    (quast_qc_df, 'Sample'), (busco_df, 'Sample'),
+    (checkm2_df, 'Name'), (checkm_df, 'Bin Id'),
+    (gunc_df, 'genome'), (magpurify_qc_df, 'Sample'),
+):
+    _name_by_key.update(_qc_names(_df, _col))
+_diag_keys = {sample_key(s) for s in _diag_order}
+for _ska_name in _diag_order:
+    _name_by_key[sample_key(_ska_name)] = _ska_name  # alignment spelling wins
+
+_all_sample_keys = set(_name_by_key.keys())
+_sample_universe = (
+    [s for s in _diag_order if sample_key(s) in _all_sample_keys]
+    + sorted(_name_by_key[k] for k in _all_sample_keys if k not in _diag_keys)
+)
+
+_checkm2_complete  = _qc_lookup(checkm2_df, 'Name', 'Completeness')
+_checkm2_contam    = _qc_lookup(checkm2_df, 'Name', 'Contamination')
+_checkm_complete   = _qc_lookup(checkm_df, 'Bin Id', 'Completeness')
+_checkm_contam     = _qc_lookup(checkm_df, 'Bin Id', 'Contamination')
+_gunc_pass         = _qc_lookup(gunc_df, 'genome', 'pass.GUNC')
+_gunc_css          = _qc_lookup(gunc_df, 'genome', 'clade_separation_score')
+_busco_complete    = _qc_lookup(busco_df, 'Sample', 'C')
+_busco_single      = _qc_lookup(busco_df, 'Sample', 'S')
+_busco_duplicated  = _qc_lookup(busco_df, 'Sample', 'D')
+_busco_fragmented  = _qc_lookup(busco_df, 'Sample', 'F')
+_busco_missing     = _qc_lookup(busco_df, 'Sample', 'M')
+_quast_size_lookup = _qc_lookup(quast_qc_df, 'Sample', 'Total length')
+
+# MAGpurify: total flagged contigs across all available modules per sample.
+_magpurify_flagged_total = {}
+if not magpurify_qc_df.empty:
+    _mp_flag_cols = [c for c in
+                     ('gc-content_flagged', 'tetra-freq_flagged', 'phylo-markers_flagged')
+                     if c in magpurify_qc_df.columns]
+    for _, _mrow in magpurify_qc_df.iterrows():
+        _magpurify_flagged_total[sample_key(_mrow['Sample'])] = \
+            sum(_mrow.get(c, 0) or 0 for c in _mp_flag_cols)
+
+# Genome-size outlier z-score (raw QUAST assembly length — distinct from
+# the Gubbins alignment-span check in §4.7).
+_size_vals = pd.to_numeric(pd.Series(_quast_size_lookup), errors='coerce').dropna()
+_size_mean, _size_std = (_size_vals.mean(), _size_vals.std()) if len(_size_vals) > 1 else (np.nan, np.nan)
+
+def _size_z(key):
+    v = _quast_size_lookup.get(key)
+    if v is None or pd.isna(_size_std) or _size_std == 0:
+        return None
+    return round((float(v) - _size_mean) / _size_std, 2)
+
+_mfs_5 = sorted(completeness_data.keys())
+
+criteria_rows = []
+for _sample_name in _sample_universe:
+    _k = sample_key(_sample_name)
+    _row = {
+        'sample_id': _sample_name,
+        'in_alignment': _k in _diag_keys,
+        'display': sample_display_label(_sample_name),
+        'class': metadata_class(_sample_name) or 'unknown',
+        'checkm2_completeness': _checkm2_complete.get(_k, _checkm_complete.get(_k)),
+        'checkm2_contamination': _checkm2_contam.get(_k, _checkm_contam.get(_k)),
+        'gunc_pass': _gunc_pass.get(_k),
+        'gunc_css': _gunc_css.get(_k),
+        'busco_completeness': _busco_complete.get(_k),
+        'busco_single': _busco_single.get(_k),
+        'busco_duplicated': _busco_duplicated.get(_k),
+        'busco_fragmented': _busco_fragmented.get(_k),
+        'busco_missing': _busco_missing.get(_k),
+        'magpurify_flagged_total': _magpurify_flagged_total.get(_k),
+        'genome_size': _quast_size_lookup.get(_k),
+        'genome_size_z': _size_z(_k),
+    }
+    for _mf in _mfs_5:
+        _frac = completeness_data.get(_mf, {}).get(_sample_name)
+        _row[f'missing_pct_{_mf}'] = round((1 - _frac) * 100, 2) if _frac is not None else None
+    criteria_rows.append(_row)
+
+criteria_df = pd.DataFrame(criteria_rows)
+criteria_df.to_csv(tables_dir / 'genome_filtering_criteria.csv', index=False)
+
+# Build the JSON payload for OJS separately from the flat (CSV-friendly) criteria_rows.
+# IMPORTANT: don't reconstruct per-min_freq column names by string-interpolating the
+# float in JS (e.g. `missing_pct_${minFreq}`) to look them up — Python's f-string keeps
+# "1.0" but JS's default Number-to-string drops the trailing ".0" ("1"), so the key
+# silently never matches for whole-number min_freq values. Send a nested
+# [{min_freq, missing_pct}, ...] list instead and match numerically in JS.
+def _sanitize(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if isinstance(val, (np.bool_, bool)):
+        return bool(val)
+    if isinstance(val, (np.integer,)):
+        return int(val)
+    if isinstance(val, (np.floating,)):
+        return float(val)
+    return val
+
+_criteria_records = []
+for _row in criteria_rows:
+    _rec = {
+        k: _sanitize(v) for k, v in _row.items() if not k.startswith('missing_pct_')
+    }
+    _rec['missing_by_freq'] = [
+        {'min_freq': _mf, 'missing_pct': _sanitize(_row.get(f'missing_pct_{_mf}'))}
+        for _mf in _mfs_5
+    ]
+    _criteria_records.append(_rec)
+
+suggested_thresholds = {
+    'checkm_min_completeness': 90,
+    'checkm_max_contamination': 5,
+    'require_gunc_pass': True,
+    'max_gunc_css': 0.45,
+    'busco_min_completeness': 90,
+    'busco_min_single': 80,
+    'busco_max_duplicated': 10,
+    'busco_max_fragmented': 10,
+    'busco_max_missing': 10,
+    'max_magpurify_flagged': 5,
+    'max_size_zscore': 2,
+    'max_missing_pct': 10,
+    'default_min_freq': _mfs_5[-1] if _mfs_5 else None,
+}
+```
+
+```{python}
+#| echo: false
+# NOTE: ojs_define() must run in a cell marked `#| echo: false`, not
+# `#| include: false` — the latter suppresses the special cell output that
+# carries the data payload to OJS, leaving the widget's variables undefined.
+ojs_define(
+    criteria_records=_criteria_records,
+    suggested_thresholds=suggested_thresholds,
+    min_freq_options=_mfs_5,
+)
+```
+
+```{python}
+#| echo: false
+display(Markdown(
+    f"*Combined criteria for {len(criteria_df)} genomes saved to "
+    f"`{(tables_dir / 'genome_filtering_criteria.csv').resolve()}`.*"
+))
+```
+
+{{< include _genome_filtering_widget.qmd >}}
 
 ```{python}
 #| include: false
