@@ -192,6 +192,8 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 | `--skip_iqtree` | `false` | Skip IQ-TREE. Alignment, snp-sites, and Gubbins still run on all branches. Useful for inspecting alignments before tree inference |
 | `--ska_merged_skf` | `null` | Path to a pre-computed `merged.skf`. When set, `ska build`, `ska merge`, and FastANI are skipped |
 | `--ska_delete_samples` | `null` | Path to a plain-text file with one sample name per line. Those samples are removed from the merged SKF before alignment |
+| `--ska_gubbins_subset` | `false` | Subset the post-weed SKF before `ska map`/Gubbins to reduce Gubbins runtime. Only the Gubbins track is affected |
+| `--ska_gubbins_subset_target_snps` | `null` | Target SNP count for `--ska_gubbins_subset`. The pipeline reads the post-weed SKF SNP count and runs `ska-shard subset --sparsity ceil(current / target)` |
 | `--ska_distance` | `false` | Run `ska distance` to produce a pairwise SNP distance table and NJ tree |
 | `--ska_lo` | `false` | Run `ska lo` to identify SNPs and INDELs left out of the split-kmer graph (proxy for ambiguous regions) |
 | `--ska_lo_reference` | `null` | Optional reference FASTA to anchor `ska lo` coordinates |
@@ -248,6 +250,9 @@ results/                              (QC detail, within 01_explore/)
     distances.tsv                 pairwise SNP distances (if --ska_distance)
     lo_output_snps.fas            left-out SNPs (if --ska_lo)
     lo_output_indels.vcf          left-out INDELs (if --ska_lo)
+    subset/min_freq_<f>/          optional Gubbins-only subset diagnostics
+      subset_<f>.subset.nkmers.txt       SNP count before subsetting
+      subset_<f>.subset.sparsity.txt     computed ska-shard subset --sparsity value
     min_freq_<f>/
       alignment.fasta             SNP alignment
   snpsites/
@@ -334,6 +339,8 @@ process {
 ### Gubbins arguments
 
 Gubbins detects recombinant regions and removes them from the alignment before tree inference. The pipeline always runs Gubbins on every alignment branch; the `no_gubbins` IQ-TREE track uses the snp-sites alignment directly without Gubbins masking.
+
+For large cohorts, enable `--ska_gubbins_subset true --ska_gubbins_subset_target_snps <N>` to reduce the SNP set used only for the Gubbins track. The pipeline applies this after `ska weed` and before `ska map`, so the full `ska align`, `snp-sites`, and no-Gubbins IQ-TREE outputs are unchanged. Subset and non-subset Gubbins results should be treated as different recombination analyses.
 
 ```groovy
 process {
@@ -597,6 +604,7 @@ No other software needs to be installed; all tools are pulled from container ima
 | Tool | Version | Container |
 |---|---|---|
 | SKA2 | 0.5.1 | `quay.io/biocontainers/ska2:0.5.1--h4349ce8_0` |
+| ska-minimizer-split | 0.1.3 | `ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.3` |
 | FastANI | — | `quay.io/biocontainers/fastani:1.34--h0ffd775_2` |
 | snp-sites | — | nf-core/snpsites |
 | Gubbins | 3.4.3 | `quay.io/biocontainers/gubbins:3.4.3--py310h5140242_0` |

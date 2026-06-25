@@ -1,0 +1,90 @@
+nextflow_process {
+    name "Test Process SKA2_SUBSET"
+    script "../main.nf"
+    process "SKA2_SUBSET"
+
+    tag "modules"
+    tag "ska2"
+    tag "ska2/subset"
+    tag "ska2/build"
+    tag "ska2/merge"
+
+    test("subset merged SKF to target SNP count") {
+        setup {
+            run("SKA2_BUILD", alias: "BUILD_1") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_61' ],
+                        file(params.test_data_base + 'BU_61_NT5381.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_BUILD", alias: "BUILD_2") {
+                script "../../build/main.nf"
+                process {
+                    """
+                    input[0] = [
+                        [ id:'BU_909' ],
+                        file(params.test_data_base + 'BU_909_NT5401.1.fa', checkIfExists: true)
+                    ]
+                    """
+                }
+            }
+            run("SKA2_MERGE") {
+                script "../../merge/main.nf"
+                process {
+                    """
+                    input[0] = BUILD_1.out.skf
+                        .mix(BUILD_2.out.skf)
+                        .map { meta, skf -> skf }
+                    """
+                }
+            }
+        }
+        when {
+            process {
+                """
+                input[0] = SKA2_MERGE.out.skf.map { skf -> [ [ id:'test', min_freq:'0.9' ], skf ] }
+                input[1] = 100
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.skf.size() == 1 },
+                { assert path(process.out.skf.get(0).get(1)).exists() },
+                { assert path(process.out.skf.get(0).get(2)).text.trim() ==~ /\d+/ },
+                { assert path(process.out.skf.get(0).get(3)).text.trim() ==~ /\d+/ },
+                { assert path(process.out.skf.get(0).get(3)).text.trim().toInteger() >= 1 },
+                { assert process.out.versions.size() == 1 },
+                { assert path(process.out.versions.get(0)).exists() }
+            )
+        }
+    }
+
+    test("subset merged SKF - stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test', min_freq:'0.9' ], file('stub.skf') ]
+                input[1] = 1000
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.skf.get(0).get(1)).exists() },
+                { assert path(process.out.skf.get(0).get(2)).text.trim() == '100' },
+                { assert path(process.out.skf.get(0).get(3)).text.trim() == '1' },
+                { assert process.out.versions.size() == 1 },
+                { assert path(process.out.versions.get(0)).exists() }
+            )
+        }
+    }
+}

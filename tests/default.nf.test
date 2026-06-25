@@ -80,6 +80,26 @@ nextflow_pipeline {
         }
     }
 
+    test("three B. uniformis genomes - stub with gubbins subset") {
+        options "-stub"
+        when {
+            params {
+                input                          = "${projectDir}/tests/samplesheets/test.csv"
+                outdir                         = "$outputDir"
+                skip_qc                        = true
+                ska_gubbins_subset             = true
+                ska_gubbins_subset_target_snps = 1000
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // default stub (26) + 1 SKA2_SUBSET for the single min_freq branch = 27 tasks
+                { assert workflow.trace.succeeded().size() == 27 }
+            )
+        }
+    }
+
     test("three B. uniformis genomes - stub with delete") {
         options "-stub"
         when {
@@ -253,6 +273,27 @@ nextflow_pipeline {
                 // + 1 DUMPSOFTWAREVERSIONS + 1 MULTIQC (= 2)
                 // = 17 + 10 + 4 + 2 = 33 tasks
                 { assert workflow.trace.succeeded().size() == 33 }
+            )
+        }
+    }
+
+    test("three B. uniformis genomes - stub two min-freq values with gubbins subset") {
+        options "-stub"
+        when {
+            params {
+                input                          = "${projectDir}/tests/samplesheets/test.csv"
+                outdir                         = "$outputDir"
+                ska_align_min_freq             = "0.5,0.9"
+                ska_gubbins_subset             = true
+                ska_gubbins_subset_target_snps = 1000
+                skip_qc                        = true
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // two-min_freq stub (33) + 2 SKA2_SUBSET tasks = 35 tasks
+                { assert workflow.trace.succeeded().size() == 35 }
             )
         }
     }

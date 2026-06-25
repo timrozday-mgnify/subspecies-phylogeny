@@ -6,6 +6,7 @@ include { SKA2_DELETE                 } from '../modules/local/ska2/delete/main'
 include { SKA2_DISTANCE               } from '../modules/local/ska2/distance/main'
 include { SKA2_LO                     } from '../modules/local/ska2/lo/main'
 include { SKA2_WEED                   } from '../modules/local/ska2/weed/main'
+include { SKA2_SUBSET                 } from '../modules/local/ska2/subset/main'
 include { SKA2_MAP                    } from '../modules/local/ska2/map/main'
 include { SELECT_REFERENCE            } from '../modules/local/select_reference/main'
 include { NJ_TREE as NJ_TREE_FASTANI  } from '../modules/local/nj_tree/main'
@@ -48,6 +49,15 @@ workflow SUBSPECIES_PHYLOGENY {
     ch_lo_indels  = Channel.empty()
 
     if (!params.skip_phylo) {
+
+    if (params.ska_gubbins_subset) {
+        if (params.ska_gubbins_subset_target_snps == null) {
+            throw new IllegalArgumentException("--ska_gubbins_subset requires --ska_gubbins_subset_target_snps")
+        }
+        if ((params.ska_gubbins_subset_target_snps as Integer) <= 0) {
+            throw new IllegalArgumentException("--ska_gubbins_subset_target_snps must be a positive integer")
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Upstream: either run the full BUILD → MERGE chain or skip straight to
@@ -228,10 +238,19 @@ workflow SUBSPECIES_PHYLOGENY {
                 }
                 .map { meta, skf, nkmers_file -> [ meta, skf ] }
 
+            ch_gubbins_skf = ch_weeded_skf
+            if (params.ska_gubbins_subset) {
+                SKA2_SUBSET(ch_weeded_skf, params.ska_gubbins_subset_target_snps as Integer)
+                ch_versions = ch_versions.mix(SKA2_SUBSET.out.versions.first())
+
+                ch_gubbins_skf = SKA2_SUBSET.out.skf
+                    .map { meta, skf, nkmers_file, sparsity_file -> [ meta, skf ] }
+            }
+
             // Pair each weeded SKF with the reference. When ch_ska_map_ref is
             // empty (ska_merged_skf mode without --ska_map_reference), the
             // combine produces no items and SKA2_MAP / GUBBINS simply never run.
-            ch_map_input = ch_weeded_skf
+            ch_map_input = ch_gubbins_skf
                 .combine(ch_ska_map_ref)
                 .map { meta, skf, ref -> [ meta, ref, skf ] }
 
