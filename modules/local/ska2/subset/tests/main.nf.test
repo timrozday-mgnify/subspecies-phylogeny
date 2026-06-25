@@ -8,6 +8,7 @@ nextflow_process {
     tag "ska2/subset"
     tag "ska2/build"
     tag "ska2/merge"
+    tag "ska2/weed"
 
     test("subset merged SKF to target SNP count") {
         setup {
@@ -43,11 +44,19 @@ nextflow_process {
                     """
                 }
             }
+            run("SKA2_WEED") {
+                script "../../weed/main.nf"
+                process {
+                    """
+                    input[0] = SKA2_MERGE.out.skf.map { skf -> [ [ id:'test', min_freq:'0.9' ], skf ] }
+                    """
+                }
+            }
         }
         when {
             process {
                 """
-                input[0] = SKA2_MERGE.out.skf.map { skf -> [ [ id:'test', min_freq:'0.9' ], skf ] }
+                input[0] = SKA2_WEED.out.skf
                 input[1] = 100
                 """
             }
@@ -55,13 +64,13 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert process.out.skf.size() == 1 },
-                { assert path(process.out.skf.get(0).get(1)).exists() },
-                { assert path(process.out.skf.get(0).get(2)).text.trim() ==~ /\d+/ },
-                { assert path(process.out.skf.get(0).get(3)).text.trim() ==~ /\d+/ },
-                { assert path(process.out.skf.get(0).get(3)).text.trim().toInteger() >= 1 },
-                { assert process.out.versions.size() == 1 },
-                { assert path(process.out.versions.get(0)).exists() }
+                { assert process.out.skf.size() >= 1 },
+                { assert process.out.skf.every { tuple -> path(tuple.get(1)).exists() } },
+                { assert process.out.skf.every { tuple -> path(tuple.get(2)).text.trim() ==~ /\d+/ } },
+                { assert process.out.skf.every { tuple -> path(tuple.get(3)).text.trim().toBigDecimal() > 0 } },
+                { assert process.out.skf.every { tuple -> path(tuple.get(3)).text.trim().toBigDecimal() <= 1 } },
+                { assert process.out.versions.size() == process.out.skf.size() },
+                { assert process.out.versions.every { version -> path(version).exists() } }
             )
         }
     }
@@ -71,7 +80,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test', min_freq:'0.9' ], file('stub.skf') ]
+                input[0] = [ [ id:'test', min_freq:'0.9' ], file('stub.skf'), file('stub.nkmers.txt') ]
                 input[1] = 1000
                 """
             }

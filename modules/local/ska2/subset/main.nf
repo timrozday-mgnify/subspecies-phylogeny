@@ -10,7 +10,7 @@ process SKA2_SUBSET {
         'ghcr.io/timrozday-mgnify/ska-minimizer-split:0.1.3' }"
 
     input:
-    tuple val(meta), path(skf)
+    tuple val(meta), path(skf), path(nkmers_file)
     val(target_snps)
 
     output:
@@ -24,9 +24,9 @@ process SKA2_SUBSET {
     def args   = task.ext.args   ?: ''
     def prefix = task.ext.prefix ?: "subset_${meta.id}"
     """
-    current_snps=\$(ska nk ${skf} | sed -n 's/^k-mers=//p')
-    if [ -z "\$current_snps" ]; then
-        echo "Could not read k-mer count from ${skf}" >&2
+    current_snps=\$(cat ${nkmers_file})
+    if ! printf '%s\\n' "\$current_snps" | grep -Eq '^[0-9]+\$'; then
+        echo "Could not read numeric k-mer count from ${nkmers_file}" >&2
         exit 1
     fi
 
@@ -36,10 +36,13 @@ process SKA2_SUBSET {
         exit 1
     fi
 
-    sparsity=\$(( (current_snps + target_snps - 1) / target_snps ))
-    if [ "\$sparsity" -lt 1 ]; then
-        sparsity=1
-    fi
+    sparsity=\$(awk -v current="\$current_snps" -v target="\$target_snps" 'BEGIN {
+        sparsity = target / current
+        if (sparsity > 1) {
+            sparsity = 1
+        }
+        printf "%.12g\\n", sparsity
+    }')
 
     ska-shard subset \\
         $args \\

@@ -236,9 +236,9 @@ workflow SUBSPECIES_PHYLOGENY {
                     }
                     keep
                 }
-                .map { meta, skf, nkmers_file -> [ meta, skf ] }
 
             ch_gubbins_skf = ch_weeded_skf
+                .map { meta, skf, nkmers_file -> [ meta, skf ] }
             if (params.ska_gubbins_subset) {
                 SKA2_SUBSET(ch_weeded_skf, params.ska_gubbins_subset_target_snps as Integer)
                 ch_versions = ch_versions.mix(SKA2_SUBSET.out.versions.first())

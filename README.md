@@ -193,7 +193,7 @@ Outputs are published under `results/qc/<toolname>/<sample>/`.
 | `--ska_merged_skf` | `null` | Path to a pre-computed `merged.skf`. When set, `ska build`, `ska merge`, and FastANI are skipped |
 | `--ska_delete_samples` | `null` | Path to a plain-text file with one sample name per line. Those samples are removed from the merged SKF before alignment |
 | `--ska_gubbins_subset` | `false` | Subset the post-weed SKF before `ska map`/Gubbins to reduce Gubbins runtime. Only the Gubbins track is affected |
-| `--ska_gubbins_subset_target_snps` | `null` | Target SNP count for `--ska_gubbins_subset`. The pipeline reads the post-weed SKF SNP count and runs `ska-shard subset --sparsity ceil(current / target)` |
+| `--ska_gubbins_subset_target_snps` | `null` | Target SNP count for `--ska_gubbins_subset`. The pipeline reads the post-weed SKF SNP count and runs `ska-shard subset --sparsity min(target / current, 1)` |
 | `--ska_distance` | `false` | Run `ska distance` to produce a pairwise SNP distance table and NJ tree |
 | `--ska_lo` | `false` | Run `ska lo` to identify SNPs and INDELs left out of the split-kmer graph (proxy for ambiguous regions) |
 | `--ska_lo_reference` | `null` | Optional reference FASTA to anchor `ska lo` coordinates |

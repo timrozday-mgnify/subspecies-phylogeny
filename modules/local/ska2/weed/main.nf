@@ -42,7 +42,7 @@ process SKA2_WEED {
     prefix = task.ext.prefix ?: "weeded_${meta.id}"
     """
     touch ${prefix}.skf
-    echo 1 > ${prefix}.nkmers.txt
+    echo 100 > ${prefix}.nkmers.txt
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
