@@ -105,7 +105,7 @@ qc_dir_path = results_dir
 # ---- Highlights and optional genome metadata -------------------------
 _DEFAULT_PALETTE = ['#e63946', '#f4a261', '#2a9d8f', '#8338ec', '#fb8500']
 highlights = {}   # name -> {'label': str, 'color': str}
-genome_metadata_classes = {}  # normalized sample name -> isolate|MAG
+genome_metadata_classes = {}  # normalized sample name -> isolate|mag|outgroup
 genome_metadata_status = "not provided"
 genome_metadata_counts = {}
 
@@ -123,8 +123,9 @@ if _hf:
 
 DEFAULT_TIP_COLOR = '#457b9d'
 METADATA_STYLES = {
-    'isolate': {'label': 'Isolate', 'color': '#1b9e77', 'symbol': 'I'},
-    'MAG': {'label': 'MAG', 'color': '#7570b3', 'symbol': 'M'},
+    'isolate':  {'label': 'Isolate',  'color': '#1b9e77', 'symbol': 'I'},
+    'mag':      {'label': 'MAG',      'color': '#7570b3', 'symbol': 'M'},
+    'outgroup': {'label': 'Outgroup', 'color': '#e76f51', 'symbol': 'O'},
 }
 
 
@@ -152,10 +153,11 @@ def is_ref_sample(name):
     )
 
 
-def _class_from_isolate(value):
+def _class_from_type(value):
     if pd.isna(value):
         return None
-    return 'isolate' if _as_bool(value) else 'MAG'
+    cls = str(value).strip().lower()
+    return cls if cls in METADATA_STYLES else None
 
 
 _mf = str(metadata_file).strip()
@@ -165,11 +167,11 @@ if _mf:
         try:
             _metadata_df = pd.read_csv(_metadata_path)
             _metadata_cols = {c.lower(): c for c in _metadata_df.columns}
-            if {'sample', 'isolate'}.issubset(_metadata_cols):
+            if {'sample', 'type'}.issubset(_metadata_cols):
                 _sample_col = _metadata_cols['sample']
-                _isolate_col = _metadata_cols['isolate']
+                _type_col = _metadata_cols['type']
                 for _, _row in _metadata_df.iterrows():
-                    _cls = _class_from_isolate(_row[_isolate_col])
+                    _cls = _class_from_type(_row[_type_col])
                     if _cls:
                         genome_metadata_classes[sample_key(_row[_sample_col])] = _cls
                 genome_metadata_counts = dict(
@@ -181,7 +183,7 @@ if _mf:
                 )
             else:
                 genome_metadata_status = (
-                    f"ignored {_metadata_path} because it lacks sample/isolate columns"
+                    f"ignored {_metadata_path} because it lacks sample/type columns"
                 )
         except Exception as exc:
             genome_metadata_status = f"ignored {_metadata_path}: {exc}"
@@ -689,14 +691,15 @@ def draw_toytree(
                 style={'stroke-linecap': 'round'},
             )
 
-        _isolates = [tip for tip in tips if metadata_class(tip) == 'isolate']
-        _draw_tick_group(
-            _isolates,
-            METADATA_STYLES['isolate']['color'],
-            start_mult=0.015,
-            end_mult=0.085,
-            stroke_width=2.2,
-        )
+        for _cls, _style in METADATA_STYLES.items():
+            _tips_for_cls = [tip for tip in tips if metadata_class(tip) == _cls]
+            _draw_tick_group(
+                _tips_for_cls,
+                _style['color'],
+                start_mult=0.015,
+                end_mult=0.085,
+                stroke_width=2.2,
+            )
         if ref_name:
             _ref_ticks = [tip for tip in tips if is_ref_sample(tip)] or [ref_name]
             _draw_tick_group(
@@ -1121,7 +1124,7 @@ else:
 
     display(Markdown(
         "**Compact unlabeled NJ tree**\n\n"
-        "Right-side ticks mark isolates in green and the FastANI medoid in red."
+        "Right-side ticks mark genome type (see legend above) and the FastANI medoid in red."
     ))
     display(HTML(html_compact))
 ```

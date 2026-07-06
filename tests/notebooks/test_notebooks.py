@@ -65,9 +65,9 @@ def stage1_metadata_render(tmp_path_factory):
     out = tmp_path_factory.mktemp("stage1_metadata")
     metadata_file = tmp_path_factory.mktemp("stage1_metadata_file") / "genome_metadata.csv"
     metadata_file.write_text(
-        "sample,isolate\n"
-        "BU_61_NT5381,true\n"
-        "BU_909_NT5401,false\n",
+        "sample,type\n"
+        "BU_61_NT5381,isolate\n"
+        "BU_909_NT5401,mag\n",
         encoding="utf-8",
     )
     result = _render(
@@ -164,9 +164,9 @@ def stage2_metadata_render(tmp_path_factory):
     out = tmp_path_factory.mktemp("stage2_metadata")
     metadata_file = tmp_path_factory.mktemp("stage2_metadata_file") / "genome_metadata.csv"
     metadata_file.write_text(
-        "sample,isolate\n"
-        "BU_61_NT5381,true\n"
-        "BU_909_NT5401,false\n",
+        "sample,type\n"
+        "BU_61_NT5381,isolate\n"
+        "BU_909_NT5401,mag\n",
         encoding="utf-8",
     )
     result = _render(
@@ -302,4 +302,4 @@ class TestStage2Build:
         assert result.returncode == 0, f"quarto render failed:\n{result.stderr}"
         html = (out / "stage2_build.html").read_text(encoding="utf-8")
         assert "Genome metadata legend" in html
-        assert "Right-side ticks mark isolates in green and the FastANI medoid in red" in html
+        assert "Right-side ticks mark genome type (see legend above) and the FastANI medoid in red" in html
